@@ -58,7 +58,7 @@ void rpython_startup_code(void)
 #ifdef RPY_WITH_GIL
     RPyGilRelease();
 #endif
-}
+}}
 
 
 RPY_EXTERN
@@ -129,7 +129,7 @@ int pypy_main_function(int argc, char *argv[])
     fprintf(stderr, "Fatal error during initialization: %s\n", errmsg);
     abort();
     return 1;
-}
+}}
 
 int PYPY_MAIN_FUNCTION(int argc, char *argv[])
 {
