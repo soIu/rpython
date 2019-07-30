@@ -31,7 +31,7 @@ It will compiles the main.py to an executable named main-c.
 # Compatibility
 There's two things that are commented out from the RPython's source code:
 
--ASM call
--Pthread
+- ASM call
+- Pthread
 
 Emscripten doesn't support ASM call on the resulting binary as it would make it not portable. And for now Pthread is also commented because major browsers have not implement it [yet](https://emscripten.org/docs/porting/pthreads.html).
