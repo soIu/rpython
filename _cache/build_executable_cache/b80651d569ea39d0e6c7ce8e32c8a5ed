@@ -1,0 +1,10 @@
+-+- 0
+align: 8
+size: 16
+fldofs tv_sec: 0
+fldsize tv_sec: 8
+fldunsigned tv_sec: 0
+fldofs tv_usec: 8
+fldsize tv_usec: 8
+fldunsigned tv_usec: 0
+---
