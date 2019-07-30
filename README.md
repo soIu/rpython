@@ -2,7 +2,7 @@
 This is a fork from PyPy's RPython in the original bitbucket [repo](https://bitbucket.org/pypy/pypy/src/default/rpython/) compatible to Emscripten's [emcc](https://emscripten.org/docs/tools_reference/emcc.html).
 
 # What is RPython
-Graham Jenson writes a nice article about [it](https://maori.geek.nz/rpython-compiling-python-to-c-for-the-speed-5411d57a5316). Basically, RPython is what powers PyPy as described [here](https://rpython.readthedocs.io/en/latest/).
+Graham Jenson writes a nice [article](https://maori.geek.nz/rpython-compiling-python-to-c-for-the-speed-5411d57a5316) about it. Basically, RPython is what powers PyPy as described in its documentation [here](https://rpython.readthedocs.io/en/latest/).
 
 # Installation
 RPython it self depends on PyPy and GCC. Install PyPy from the official [website](https://pypy.org/download.html).
