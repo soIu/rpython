@@ -1,0 +1,24 @@
+-+- 0
+value: 0
+---
+-+- 1
+value: 10
+---
+-+- 2
+align: 8
+size: 280
+fldofs d_name: 19
+fldsize d_name: 256
+fldofs d_ino: 0
+fldsize d_ino: 8
+fldunsigned d_ino: 1
+fldofs d_type: 18
+fldsize d_type: 1
+fldunsigned d_type: 1
+---
+-+- 3
+value: 4
+---
+-+- 4
+value: 8
+---

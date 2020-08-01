@@ -1,0 +1,38 @@
+-+- 0
+align: 8
+size: 16
+fldofs tv_sec: 0
+fldsize tv_sec: 8
+fldunsigned tv_sec: 0
+fldofs tv_nsec: 8
+fldsize tv_nsec: 8
+fldunsigned tv_nsec: 0
+---
+-+- 1
+defined: 1
+value: 256
+---
+-+- 2
+defined: 1
+value: 512
+---
+-+- 3
+defined: 1
+value: 1073741823
+---
+-+- 4
+defined: 1
+value: 1073741822
+---
+-+- 5
+defined: 1
+value: -100
+---
+-+- 6
+defined: 1
+value: 4096
+---
+-+- 7
+defined: 1
+value: 0
+---

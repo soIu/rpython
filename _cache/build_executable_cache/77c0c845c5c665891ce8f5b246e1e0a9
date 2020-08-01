@@ -1,0 +1,74 @@
+-+- 0
+align: 8
+size: 128
+fldofs st_mode: 16
+fldsize st_mode: 4
+fldunsigned st_mode: 1
+fldofs st_ino: 8
+fldsize st_ino: 8
+fldunsigned st_ino: 1
+fldofs st_dev: 0
+fldsize st_dev: 8
+fldunsigned st_dev: 1
+fldofs st_nlink: 20
+fldsize st_nlink: 4
+fldunsigned st_nlink: 1
+fldofs st_uid: 24
+fldsize st_uid: 4
+fldunsigned st_uid: 1
+fldofs st_gid: 28
+fldsize st_gid: 4
+fldunsigned st_gid: 1
+fldofs st_size: 48
+fldsize st_size: 8
+fldunsigned st_size: 0
+fldofs st_atim: 72
+fldsize st_atim: 16
+fldofs st_mtim: 88
+fldsize st_mtim: 16
+fldofs st_ctim: 104
+fldsize st_ctim: 16
+fldofs st_blksize: 56
+fldsize st_blksize: 4
+fldunsigned st_blksize: 0
+fldofs st_blocks: 64
+fldsize st_blocks: 8
+fldunsigned st_blocks: 0
+fldofs st_rdev: 32
+fldsize st_rdev: 8
+fldunsigned st_rdev: 1
+---
+-+- 1
+align: 8
+size: 112
+fldofs f_bsize: 0
+fldsize f_bsize: 8
+fldunsigned f_bsize: 1
+fldofs f_frsize: 8
+fldsize f_frsize: 8
+fldunsigned f_frsize: 1
+fldofs f_blocks: 16
+fldsize f_blocks: 8
+fldunsigned f_blocks: 1
+fldofs f_bfree: 24
+fldsize f_bfree: 8
+fldunsigned f_bfree: 1
+fldofs f_bavail: 32
+fldsize f_bavail: 8
+fldunsigned f_bavail: 1
+fldofs f_files: 40
+fldsize f_files: 8
+fldunsigned f_files: 1
+fldofs f_ffree: 48
+fldsize f_ffree: 8
+fldunsigned f_ffree: 1
+fldofs f_favail: 56
+fldsize f_favail: 8
+fldunsigned f_favail: 1
+fldofs f_flag: 72
+fldsize f_flag: 8
+fldunsigned f_flag: 1
+fldofs f_namemax: 80
+fldsize f_namemax: 8
+fldunsigned f_namemax: 1
+---

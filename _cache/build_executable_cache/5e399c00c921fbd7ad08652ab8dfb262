@@ -1,0 +1,67 @@
+-+- 0
+defined: 0
+---
+-+- 1
+defined: 1
+value: 1
+---
+-+- 2
+align: 8
+size: 16
+fldofs tv_sec: 0
+fldsize tv_sec: 8
+fldunsigned tv_sec: 0
+fldofs tv_usec: 8
+fldsize tv_usec: 8
+fldunsigned tv_usec: 0
+---
+-+- 3
+defined: 0
+---
+-+- 4
+defined: 1
+value: 2
+---
+-+- 5
+defined: 1
+value: 0
+---
+-+- 6
+defined: 1
+value: 4
+---
+-+- 7
+defined: 1
+value: 4
+---
+-+- 8
+defined: 1
+value: 3
+---
+-+- 9
+defined: 1
+value: 6
+---
+-+- 10
+defined: 1
+value: 5
+---
+-+- 11
+defined: 1
+value: 7
+---
+-+- 12
+align: 8
+size: 144
+fldofs ru_utime: 0
+fldsize ru_utime: 16
+fldofs ru_stime: 16
+fldsize ru_stime: 16
+---
+-+- 13
+defined: 0
+---
+-+- 14
+defined: 1
+value: 0
+---

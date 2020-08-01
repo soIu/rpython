@@ -1,0 +1,129 @@
+-+- 0
+defined: 1
+value: 2
+---
+-+- 1
+align: 8
+size: 32
+fldofs tms_utime: 0
+fldsize tms_utime: 8
+fldunsigned tms_utime: 0
+fldofs tms_stime: 8
+fldsize tms_stime: 8
+fldunsigned tms_stime: 0
+fldofs tms_cutime: 16
+fldsize tms_cutime: 8
+fldunsigned tms_cutime: 0
+fldofs tms_cstime: 24
+fldsize tms_cstime: 8
+fldunsigned tms_cstime: 0
+---
+-+- 2
+defined: 1
+value: 3
+---
+-+- 3
+size: 4
+unsigned: 1
+---
+-+- 4
+defined: 1
+value: 0
+---
+-+- 5
+defined: 1
+value: 21523
+---
+-+- 6
+size: 8
+unsigned: 0
+---
+-+- 7
+size: 8
+unsigned: 0
+---
+-+- 8
+size: 4
+unsigned: 1
+---
+-+- 9
+defined: 1
+value: 2048
+---
+-+- 10
+size: 8
+---
+-+- 11
+align: 8
+size: 16
+fldofs actime: 0
+fldsize actime: 8
+fldunsigned actime: 0
+fldofs modtime: 8
+fldsize modtime: 8
+fldunsigned modtime: 0
+---
+-+- 12
+defined: 1
+value: 2
+---
+-+- 13
+defined: 1
+value: 1
+---
+-+- 14
+defined: 1
+value: 1
+---
+-+- 15
+defined: 1
+value: 0
+---
+-+- 16
+defined: 1
+value: 0
+---
+-+- 17
+defined: 1
+value: 0
+---
+-+- 18
+align: 2
+size: 8
+fldofs ws_row: 0
+fldsize ws_row: 2
+fldunsigned ws_row: 1
+fldofs ws_col: 2
+fldsize ws_col: 2
+fldunsigned ws_col: 1
+fldofs ws_xpixel: 4
+fldsize ws_xpixel: 2
+fldunsigned ws_xpixel: 1
+fldofs ws_ypixel: 6
+fldsize ws_ypixel: 2
+fldunsigned ws_ypixel: 1
+---
+-+- 19
+defined: 1
+value: 1
+---
+-+- 20
+size: 4
+unsigned: 1
+---
+-+- 21
+defined: 1
+value: 1
+---
+-+- 22
+defined: 1
+value: 3
+---
+-+- 23
+defined: 1
+value: 2
+---
+-+- 24
+defined: 1
+value: 2
+---
