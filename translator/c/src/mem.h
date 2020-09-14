@@ -201,8 +201,8 @@ RPY_EXTERN long pypy_asm_stackwalk(void*, void*);
 #define pypy_asm_gc_nocollect(f) asm volatile ("/* GC_NOCOLLECT " #f " */" \
                                                : : )
 
-#define pypy_asm_keepalive(v)  asm volatile ("/* keepalive %0 */" : : \
-                                             "g" (v))
+#define pypy_asm_keepalive(v)  //asm volatile ("/* keepalive %0 */" : : \
+                               //              "g" (v))
 
 /* marker for trackgcroot.py, and inhibits tail calls */
 #define pypy_asm_stack_bottom() { //asm volatile ("/* GC_STACK_BOTTOM */" : : : \
