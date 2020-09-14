@@ -5,8 +5,15 @@ This is a fork from PyPy's RPython in the original bitbucket [repo](https://bitb
 Graham Jenson writes a nice [article](https://maori.geek.nz/rpython-compiling-python-to-c-for-the-speed-5411d57a5316) about it. Basically, RPython is what powers PyPy as described in its documentation [here](https://rpython.readthedocs.io/en/latest/).
 
 # Installation
-RPython it self depends on PyPy and GCC. Install PyPy from the official [website](https://pypy.org/download.html).
-To compile to WASM, install Emscripten's [SDK](https://emscripten.org/docs/getting_started/downloads.html) and then change the resulting Makefile CC to emcc
+RPython it self depends on PyPy (or Python 2.7) and GCC. Install PyPy from the official [website](https://pypy.org/download.html).
+<del>To compile to WASM, install Emscripten's [SDK](https://emscripten.org/docs/getting_started/downloads.html) and then change the resulting Makefile CC to emcc</del> Install emcc from Emscripten's [SDK](https://emscripten.org/docs/getting_started/downloads.html)
+
+Install rpython with npm:
+```shell
+npm install rpython -g
+```
+
+Now the rpython executable is available in your PATH
 
 # Usage
 For example create a python file named main.py:
@@ -22,14 +29,13 @@ if __name__ == '__main__':
     import sys
     main(sys.argv)
 ```
-And then compiles it to C with RPython:
+And then compiles it to <del>C</del> WASM with RPython:
 
 ```shell
-cd rpython-wasm/
-pypy bin/rpython /path/to/main.py
+rpython /path/to/main.py
 ```
 
-It will compiles the main.py to an executable named main-c.
+It will compiles the main.py to WASM file and it's .js files (to load the WASM) to current directory.
 
 # Compatibility
 There's two things that are commented out from the RPython's source code:
