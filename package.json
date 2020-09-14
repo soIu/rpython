@@ -1,0 +1,17 @@
+{
+  "name": "rpython",
+  "version": "1.0.0",
+  "description": "WASM compatible RPython fork",
+  "bin": {
+    "rpython": "bin/compile.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/soIu/rpython.git"
+  },
+  "author": "Farrell Raafi",
+  "bugs": {
+    "url": "https://github.com/soIu/rpython/issues"
+  },
+  "homepage": "https://github.com/soIu/rpython#readme"
+}
