@@ -29,7 +29,7 @@ if __name__ == '__main__':
     import sys
     main(sys.argv)
 ```
-And then compiles it to <del>C</del> WASM with RPython:
+And then compiles it to WASM with RPython:
 
 ```shell
 rpython /path/to/main.py
