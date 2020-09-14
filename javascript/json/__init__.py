@@ -4,14 +4,20 @@ def fromString(value):
     if value is None: return 'null'
     return '"%s"' % (value)
 
+fromStr = fromString
+
 def fromInt(value):
     return '%s' % (value)
+
+fromInteger = fromInt
 
 def fromFloat(value):
     return repr(value)
 
 def fromBoolean(value):
     return 'true' if value == True else 'false' if value == False else 'null'
+
+fromBool = fromBoolean
 
 def fromDict(value): #string only
     if value is None: return 'null'
