@@ -23,7 +23,8 @@ if (!check_exist('pypy')) {
 }
 if (!check_exist('gcc -v', true)) throw new Error('GCC (gcc) must be installed and exist on PATH');
 if (!check_exist('emcc -v', true)) throw new Error('emcc (comes with emsdk) must be installed and exist on PATH');
-child_process.execSync([python, rpython, '--gc=none', '-s'].concat(process.argv.slice(2)).join(' '), {stdio: 'inherit'});
+process.env.USER = 'current';
+child_process.execSync([python, rpython, '--gc=none', '-s'].concat(process.argv.slice(2)).join(' '), {stdio: 'inherit', env: process.env});
 if (process.argv[2] && process.argv[2].indexOf('.py') !== -1) {
   var file = process.argv[2].split('.py')[0];
   var directory = path.join(os.tmpdir(), 'usession-unknown-current', 'testing_1');

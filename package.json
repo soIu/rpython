@@ -1,6 +1,6 @@
 {
   "name": "rpython",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "WASM compatible RPython fork",
   "bin": {
     "rpython": "bin/compile.js"
