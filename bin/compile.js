@@ -23,7 +23,8 @@ if (!check_exist('pypy')) {
   python = 'python2.7';
   if (!check_exist('python2.7')) throw new Error('PyPy (pypy not pypy3) or Python 2.7 (python2.7) must be installed and exist on PATH');
 }
-if (!check_exist('gcc -v', true)) throw new Error('GCC (gcc) must be installed and exist on PATH');
+if (!check_exist('make -v', true)) throw new Error('make (usually comes from build-essential, or just install the standalone package) must be installed and exist on PATH');
+//if (!check_exist('gcc -v', true)) console.error('GCC (gcc) is somewhat needed, but not necessary');
 if (!check_exist('emcc -v', true)) throw new Error('emcc (comes with emsdk) must be installed and exist on PATH');
 process.env.USER = 'current';
 child_process.execSync([python, rpython, '--gc=none', '-s'].concat(process.argv.slice(2)).join(' '), {stdio: 'inherit', env: process.env});
