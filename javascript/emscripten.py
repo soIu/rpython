@@ -224,9 +224,9 @@ def asynchronous(function):
             #return self.awaits, self.native_awaits
 
         def resolve(self, value):
-            if self.waitable.parent_id == -1: return
             self.waitable.object['resolved'] = True
             self.value = value
+            if self.waitable.parent_id == -1: return
             globals.resolve_next_event(str(self.waitable.parent_id), str(self.waitable.promise_id))
 
     source = inspect.getsource(function)
