@@ -277,7 +277,7 @@ def asynchronous(function):
         variables = {}
         if last_variables:
            for variable in last_variables:
-               objects.append(ast.parse("if isinstance(rpython_promise.promise_{0}, tuple) and len(rpython_promise.promise_{0}) == 99 and rpython_promise.promise_{0}[0] is not None: rpython_promise.var_{0} = rpython_promise.promise_{0}[0].rpython_promise.value".format(variable)).body[0])
+               objects.append(ast.parse("if isinstance(rpython_promise.promise_{0}, tuple) and len(rpython_promise.promise_{0}) == 99 and rpython_promise.promise_{0}[0] is not None:\n rpython_promise.var_{0} = rpython_promise.promise_{0}[0].rpython_promise.value\n rpython_promise.promise_{0} = rpython_dummy_tuple".format(variable)).body[0])
            objects.append(ast.parse(get_variables_name(last_variables) + ' = ' + get_variables_cache(last_variables)).body[0])
         for object in group:
             if isinstance(object, ast.Assign):
@@ -338,7 +338,7 @@ else:
         """ % (promise.parent.id, promise.id, '[' + ', '.join(['"%s"' % object.variable for object in promise.awaits]) + ']'))
     namespace = {}
     namespace.update(function_globals)
-    namespace.update({'next_event': next_event, 'globals': globals, 'Object': Object}) #, 'Wait': Wait})
+    namespace.update({'next_event': next_event, 'globals': globals, 'Object': Object, 'rpython_dummy_tuple': dummy_tuple}) #, 'Wait': Wait})
     exec(code, namespace)
     function = namespace[function.name]
     promise = Promise(function, len(groups))
