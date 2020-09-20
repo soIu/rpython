@@ -2,5 +2,7 @@ from . import json, types
 
 JSON = json
 
-class Object:
-    pass
+import os
+
+if os.getenv('RPY_USE_EMSCRIPTEN') == 'true':
+   from rpython.javascript.emscripten import *

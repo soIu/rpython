@@ -6,6 +6,8 @@ var process = require('process');
 var child_process = require('child_process');
 var rpython = path.join(__dirname, 'rpython');
 
+process.env.RPY_USE_EMSCRIPTEN = 'true';
+
 function check_exist(command, dont_append_version) {
   try {
     child_process.execSync(command + (dont_append_version ? '' : ' --version'), {stdio: 'ignore'});
