@@ -37,6 +37,58 @@ rpython /path/to/main.py
 
 It will compiles the main.py to WASM file and it's .js files (to load the WASM) to current directory.
 
+# JS API
+There are some JS API that can be used to help interfacing to JS, awaiting asynchronous functions, and building nested, multi-hierarchial, multi-types JSON:
+
+- JS Bindings
+
+```python
+from javascript import Object, JSON
+
+def main(argv):
+    console = Object('console') #Evaluate string and binds corresponding object to Object instance
+    console['log'].call('Logging from rpython') #__getitem__ and __setitem__ works in RPython but unfortunately __call__ doesnt, so we replace it with call method. Call receives *args of string, can receive stringified json from javascript.JSON
+    console['log'].call(JSON.fromDict({'array': JSON.fromList(['regular string', JSON.fromInt(2)]), 'another_json': JSON.fromDict({})})) #JSON exports useful helpers to serialize python primitive types to stringified version that are recognized in JS as their respective types
+    json_object = Object('{}') #Plain object
+    json_object['is_empty'] = JSON.fromBool(True) #__setitem__
+    json_object.log() #Prints {"is_empty": true}
+    return 0
+
+def target(*args): return main, None
+```
+
+- Async/Await like syntax
+
+```python
+from javascript import Object, asynchronous
+
+@asynchronous
+def get_page(url):
+    require = Object('require')
+    fetch = require.call('node-fetch') #Obviously, install node-fetch first on npm
+    response = fetch.call(url).wait()
+    text = response['text'].call()
+    return text
+
+@asynchronous
+def get_pages():
+    google, youtube = get_page('https://google.com').wait(), get_page('https://youtube.com').wait()
+    print(google)
+    print(youtube)
+
+def main(argv):
+    get_pages()
+    return 0
+
+def target(*args): return main, None
+```
+
+# Asynchronous Execution
+
+When we decide to implement async/await the easiest option is to use [Asyncify](https://emscripten.org/docs/porting/asyncify.html). But Asyncify come with few caveats, overhead both in performance and file size, and the worst, [reentrancy](https://emscripten.org/docs/porting/asyncify.html). Asyncify doesn't support reentrancy and that means if RPython is awaiting a task blocking the execution stack, and another function is called (either by user event like click or a timer, or another asynchronous task, etc) it will throw an error. We can overcome this by awaiting RPython until it is done executing active task and immediately call it but **that will results in synchronous execution (no parallel) and that is not what async/await is all about.**
+
+We can overcome this with implementing an event loop, awaiting in a pseudo while loop for event listener calls but that is complex and non-intiuitive. What we do alternatively is transforming the function to a series of callbacks and yields at compile time (RPython supports evaluating and modifying Python objects at compile time), consisting of variables caching and re-assigning on the next tick and resolves the caller when the function is done executing. This is all done with the asynchronous decorator.
+
 # Compatibility
 There's two things that are commented out from the RPython's source code:
 
