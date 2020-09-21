@@ -47,8 +47,10 @@ from javascript import Object, JSON
 
 def main(argv):
     console = Object('console') #Evaluate string and binds corresponding object to Object instance
-    console['log'].call('Logging from rpython') #__getitem__ and __setitem__ works in RPython but unfortunately __call__ doesnt, so we replace it with call method. Call receives *args of string, can receive stringified json from javascript.JSON
-    console['log'].call(JSON.fromDict({'array': JSON.fromList(['regular string', JSON.fromInt(2)]), 'another_json': JSON.fromDict({})})) #JSON exports useful helpers to serialize python primitive types to stringified version that are recognized in JS as their respective types
+    console['log'].call('Logging from rpython')
+    #__getitem__ and __setitem__ works in RPython but unfortunately __call__ doesnt, so we replace it with call method. Call receives *args of string, can receive stringified json from javascript.JSON
+    console['log'].call(JSON.fromDict({'array': JSON.fromList(['regular string', JSON.fromInt(2)]), 'another_json': JSON.fromDict({})}))
+    #JSON exports useful helpers to serialize python primitive types to stringified version that are recognized in JS as their respective types
     json_object = Object('{}') #Plain object
     json_object['is_empty'] = JSON.fromBool(True) #__setitem__
     json_object.log() #Prints {"is_empty": true}
@@ -67,7 +69,7 @@ def get_page(url):
     require = Object('require')
     fetch = require.call('node-fetch') #Obviously, install node-fetch first on npm
     response = fetch.call(url).wait()
-    text = response['text'].call()
+    text = response['text'].call().wait()
     return text
 
 @asynchronous
