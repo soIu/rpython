@@ -1,7 +1,7 @@
 import inspect
 import ast
 from rpython.javascript.json import parse_rpy_json
-from rpython.rtyper.lltypesystem import lltype, rffi
+from  rpython.rtyper.lltypesystem import lltype, rffi
 from rpython.translator.tool.cbuild import ExternalCompilationInfo
 #from rpython.rlib.rarithmetic import r_int32
 from rpython.rlib.entrypoint import entrypoint_highlevel
@@ -12,7 +12,7 @@ run_script_string = rffi.llexternal('emscripten_run_script_string', [rffi.CCHARP
 run_script = rffi.llexternal('emscripten_run_script', [rffi.CCHARP], lltype.Void, compilation_info=info)
 
 def run_javascript(code, returns=False):
-    code = '(function() {' + code + '})()';
+    code = '(function(global) {' + code + '})(typeof asmGlobalArg !== "undefined" ? asmGlobalArg : this)';
     if returns: return rffi.charp2str(run_script_string(rffi.str2charp(code)))
     run_script(rffi.str2charp(code))
     return None
@@ -70,8 +70,6 @@ class Object:
         self.code = code
         self.variable = 'rpython_object_' + str(self.id)
         self.type = run_javascript(String("""
-        if (typeof window !== 'undefined') window.global = window;
-        else if (typeof self !== 'undefined') self.global = self;
         global.{0} = {1}
         var object = global.{0};
         {2}
@@ -98,7 +96,7 @@ class Object:
         return Object('global.%s["%s"]' % (self.variable, key), bind="object = typeof object != 'function' ? object : object.bind(global." + self.variable + ')')
 
     def __setitem__(self, key, value):
-        run_script('global.%s["%s"] = %s' % (self.variable, key, parse_rpy_json(value)))
+        run_javascript('global.%s["%s"] = %s' % (self.variable, key, parse_rpy_json(value)))
         return
 
     def toString(self):
@@ -135,7 +133,7 @@ class Object:
     #def toList(self): TODO
 
     def log(self):
-        run_script('console.log(global.%s)' % (self.variable))
+        run_javascript('console.log(global.%s)' % (self.variable))
 
     def wait(self, awaits, native_awaits):
         self.resolved = False
