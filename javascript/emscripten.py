@@ -59,6 +59,11 @@ class Array:
             objects += [self.object[str(index)]]
         return iter(objects)
 
+class Error:
+
+    def __init__(self, message):
+        run_script(rffi.str2charp('throw new Error("%s")' % message))
+
 class Object:
 
     id = -1
