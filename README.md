@@ -49,7 +49,7 @@ def main(argv):
     console = Object('console') #Evaluate string and binds corresponding object to Object instance
     console['log'].call('Logging from rpython')
     #__getitem__ and __setitem__ works in RPython but unfortunately __call__ doesn't,
-    #so we replace it with call method. Call receives *args of string, can receive stringified json from javascript.JSON
+    #so we replace it with call method. Call receives *args of string, can receive stringified json from JSON
     console['log'].call(JSON.fromDict({
       'array': JSON.fromList(['regular string', JSON.fromInt(2)]),
       'another_json': JSON.fromDict({})
@@ -86,14 +86,23 @@ def main(argv):
     get_pages()
     return 0
 
-def target(*args): return main, None
+def target(*args): return main, None 
 ```
 
 # Asynchronous Execution
 
 When we decide to implement async/await the easiest option is to use [Asyncify](https://emscripten.org/docs/porting/asyncify.html). But Asyncify come with few caveats, overhead both in performance and file size, and the worst, [reentrancy](https://emscripten.org/docs/porting/asyncify.html). Asyncify doesn't support reentrancy and that means if RPython is awaiting a task blocking the execution stack, and another function is called (either by user event like click or a timer, or another asynchronous task, etc) it will throw an error. We can overcome this by awaiting RPython until it is done executing active task and immediately call it but **that will results in synchronous execution (no parallel) and that is not what async/await is all about.**
 
-We can overcome this with implementing an event loop, awaiting in a pseudo while loop for event listener calls but that is complex and non-intiuitive. What we do alternatively is transforming the function to a series of callbacks and yields at compile time (RPython supports evaluating and modifying Python objects at compile time), consisting of variables caching and re-assigning on the next tick and resolves the caller when the function is done executing. This is all done with the asynchronous decorator.
+Another solution is implementing an event loop, awaiting in a pseudo while loop for event listener calls but that is complex and non-intiuitive. What we do alternatively is transforming the function to a series of callbacks and yields at compile time (RPython supports evaluating and modifying Python objects at compile time), consisting of variables caching and re-assigning on the next tick and resolves the caller when the function is done executing. This is all done with the asynchronous decorator.
+
+# Limitation
+
+Because RPython is a subset of Python. You can't code in RPython just like you do on Python. Variables, functions, dictionaries, and lists can only have one type. The most dynamic type in RPython is class, class can nearly have any types on it's attributes. Just don't getattr them and assign them to a same variable, use isinstance in an if else if you insist to use getattr. The second most dynamic type in RPython is tuples, but unlike in Python tuples must be in a fixed length and you can't concat multiple tuples into one tuple. Here's a few guide to code in RPython:
+
+- https://rpython.readthedocs.io/
+- https://maori.geek.nz/rpython-is-not-a-language-an-introduction-to-the-rpython-language-9f48c7a3047
+- https://mesapy.org/rpython-by-example/
+- https://refi64.com/posts/the-magic-of-rpython.html
 
 # Compatibility
 There's two things that are commented out from the RPython's source code:
