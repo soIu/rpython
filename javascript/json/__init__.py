@@ -8,6 +8,7 @@ def rpyjson(function):
     return wrapper
 
 def parse_rpy_json(value):
+    if value is None: return 'null'
     if value.startswith('RPYJSON:') and value.endswith(':RPYJSON'):
        end = len(value) - 8
        assert end >= 0
@@ -56,3 +57,15 @@ def fromDict(value): #string only
 def fromList(values):
     if values is None: return 'null'
     return '[' + ','.join([parse_rpy_json(value) for value in values]) + ']'
+
+@rpyjson
+def fromTuple(values):
+    if values is None: return 'null'
+    return fromList(list(values), parse=True)
+
+def isFalse(value):
+    value = parse_rpy_json(value)
+    if value in ['""', '0', '0.0', 'null', 'false', '{}', '[]']: return False
+    return True
+
+def isTrue(value): return not isFalse(value)

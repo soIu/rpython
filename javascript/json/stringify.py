@@ -17,7 +17,7 @@ def main(object, stringify_value):
 #enforceargs(types.str)
 def stringify_str(value):
     if value is None: return 'null'
-    assert isinstance(value, types.str)
+    assert isinstance(value, types.str), 'value must be string in stringify_str'
     return '"%s"' % (value)
 
 #enforceargs(dict)

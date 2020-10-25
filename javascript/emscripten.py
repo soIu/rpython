@@ -1,9 +1,8 @@
 import inspect
 import ast
-from rpython.javascript.json import parse_rpy_json
-from  rpython.rtyper.lltypesystem import lltype, rffi
+from rpython.javascript import json
+from rpython.rtyper.lltypesystem import lltype, rffi
 from rpython.translator.tool.cbuild import ExternalCompilationInfo
-#from rpython.rlib.rarithmetic import r_int32
 from rpython.rlib.entrypoint import entrypoint_highlevel
 from rpython.rlib.rstring import replace
 
@@ -19,6 +18,154 @@ def run_javascript(code, returns=False):
 
 def resolve_next_event(parent_id, child_id): return
 
+#Extra JSON Types for interfacing, it is recommended to use JSON.from* APIs instead of creating fat pointers from these Object.from* APIs. This APIs is used to mix primitive types to be used on Javascript-side
+
+def rpyobject(function):
+    def wrapper(value):
+        return Object(function(value))
+    return wrapper
+
+@rpyobject
+def toString(value):
+    if value is None: return 'null'
+    return '"%s"' % (value)
+
+toStr = toString
+
+@rpyobject
+def toInt(value):
+    return '%s' % (value)
+
+toInteger = toInt
+
+@rpyobject
+def toFloat(value):
+    return repr(value)
+
+@rpyobject
+def toBoolean(value):
+    return 'true' if value == True else 'false' if value == False else 'null'
+
+toBool = toBoolean
+
+functions = []
+
+function_template = '''
+(function (...args) {
+  if (!global.rpyfunction_call_args) global.rpyfunction_call_args = {};
+  var index = %s;
+  var variable = 'global.rpyfunction_call_args[' + index + ']';
+  global.rpyfunction_call_args[index] = args;
+  args = [variable, index.toString()].map(function (string) {return allocate(intArrayFromString(string), 'i8', ALLOC_NORMAL)});
+  Module.asm.onfunctioncall(...args);
+  return global[global['rpyfunction_call_' + index]];
+});
+'''
+
+def toFunction(function):
+    index = globals.functions
+    functions.append(function)
+    globals.functions += 1
+    return Object(function_template % (index))
+
+def fromFunction(function=None):
+    if function is None: return 'RPYJSON:null:RPYJSON'
+    return toFunction(function).toRef()
+
+def Function(): return fromFunction
+
+@entrypoint_highlevel(key='main', c_name='onfunctioncall', argtypes=[rffi.CCHARP, rffi.CCHARP])
+def onfunctioncall(*arguments):
+    pointers = list(arguments)
+    variable, function_id = [rffi.charp2str(pointer) for pointer in pointers]
+    for pointer in pointers: lltype.free(pointer, flavor='raw')
+    args = Object(variable).toArray()
+    function = functions[int(function_id)]
+    result = function(args=[arg for arg in args]) #if function in decorated_functions else function([arg for arg in args])
+    run_javascript('global.rpyfunction_call_' + function_id + ((' = "%s"' % result.variable) if result is not None else ' = null'))
+
+decorated_functions = []
+
+def args(function, asynchronous=False, name=None, count=None): #Spread list of Object to each of the argument
+    if asynchronous:
+       def wrapper(function):
+           return args(asynchronous_function(function), name=function.__name__, count=function.func_code.co_argcount)
+       return wrapper
+    if name is None: name = function.__name__
+    if count is None: count = function.func_code.co_argcount
+    args = ', '.join('args[%s]' % index for index in range(count))
+    arg_names = ', '.join('rpyarg%s=None' % (index + 1) for index in range(count))
+    namespace = {'rpython_decorated_function': function, 'RPYObject': Object}
+    indent = '\n' + (' ' * 4)
+    #code = 'def ' + name + '(args=None' + (', ' if count else "") + arg_names + '):
+    code = 'def ' + name + '(' + arg_names + (', ' if count else "") + 'args=None):'
+    if count: code += indent + 'if args is None: return rpython_decorated_function(' + ', '.join('rpyarg%s or RPYObject("null")' % (index + 1) for index in range(count)) + ')'
+    code += indent + 'if args is not None and len(args) < ' + str(count) + ': return rpython_decorated_function(' + ', '.join('args[%s] if len(args) >= %s else RPYObject("null")' % (index, index + 1) for index in range(count))  + ')'
+    code += indent + 'assert args is not None and len(args) >= ' + str(count)
+    code += indent + 'return rpython_decorated_function(' + args + ')'
+    exec(code, namespace)
+    function = namespace[name]
+    decorated_functions.append(function)
+    return function
+
+function = args
+
+method_template = '''
+(function (...args) {
+  if (!global.rpymethod_call_args) global.rpymethod_call_args = {};
+  var index = %s;
+  var variable = 'global.rpymethod_call_args[' + index + ']';
+  global.rpymethod_call_args[index] = args;
+  args = [variable, index.toString()].map(function (string) {return allocate(intArrayFromString(string), 'i8', ALLOC_NORMAL)});
+  Module.asm.onmethodcall%s(...args);
+  return global[global['rpymethod_call_' + index]];
+});
+'''
+
+def fromMethod():
+    methods = {}
+    globals.method_callers += 1
+    @entrypoint_highlevel(key='main', c_name='onmethodcall' + str(globals.method_callers), argtypes=[rffi.CCHARP, rffi.CCHARP])
+    def onmethodcall(*arguments):
+        pointers = list(arguments)
+        variable, method_id = [rffi.charp2str(pointer) for pointer in pointers]
+        for pointer in pointers: lltype.free(pointer, flavor='raw')
+        args = Object(variable).toArray()
+        method = methods[int(method_id)]
+        result = method(args=[arg for arg in args])
+        run_javascript('global.rpymethod_call_' + method_id + ((' = "%s"' % result.variable) if result is not None else ' = null'))
+    def Method(method):
+        if method is None: return 'RPYJSON:null:RPYJSON'
+        globals.methods += 1
+        methods[globals.methods] = method
+        object = Object(method_template % (globals.methods, globals.method_callers))
+        return object.toRef()
+    return Method
+
+Method = fromMethod
+
+def method(function, asynchronous=False, name=None, count=None): #Spread list of Object to each of the argument
+    if asynchronous:
+       def wrapper(function):
+           return method(asynchronous_function(function), name=function.__name__, count=function.func_code.co_argcount)
+       return wrapper
+    if name is None: name = function.__name__
+    if count is None: count = function.func_code.co_argcount
+    count -= 1
+    args = ', '.join(['self'] + ['args[%s]' % index for index in range(count)])
+    arg_names = ', '.join(['self'] + ['rpyarg%s=None' % (index + 1) for index in range(count)] + ['args=None'])
+    namespace = {'rpython_decorated_function': function, 'RPYObject': Object}
+    indent = '\n' + (' ' * 4)
+    code = 'def ' + name + '(' + arg_names + '):'
+    if count: code += indent + 'if args is None: return rpython_decorated_function(' + ', '.join(['self'] + ['rpyarg%s or RPYObject("null")' % (index + 1) for index in range(count)]) + ')'
+    code += indent + 'if args is not None and len(args) < ' + str(count) + ': return rpython_decorated_function(' + ', '.join(['self'] + ['args[%s] if len(args) >= %s else RPYObject("null")' % (index, index + 1) for index in range(count)])  + ')'
+    code += indent + 'assert args is not None and len(args) >= ' + str(count)
+    code += indent + 'return rpython_decorated_function(' + args + ')'
+    exec(code, namespace)
+    function = namespace[name]
+    #decorated_methods.append(function)
+    return function
+
 class String:
 
     def __init__(self, value):
@@ -30,7 +177,7 @@ class String:
 
     def format(self, *strings):
         index = 0
-        for string in strings:
+        for string in list(strings):
             self.value = replace(self.value, '{%s}' % index, string)
             index += 1
         return self
@@ -39,6 +186,9 @@ class Globals:
 
     promises = 0
     objects = 0
+    functions = 0
+    methods = 0
+    method_callers = 0
 
     def __init__(self):
         self.resolve_next_event = resolve_next_event
@@ -69,12 +219,22 @@ class Object:
     id = -1
     resolved = True
 
-    def __init__(self, code, bind=''):
+    fromString = staticmethod(toString)
+    fromStr = staticmethod(toStr)
+    fromInteger = staticmethod(toInteger)
+    fromInt = staticmethod(toInt)
+    fromFloat = staticmethod(toFloat)
+    fromBoolean = staticmethod(toBoolean)
+    fromBool = staticmethod(toBool)
+    fromFunction = staticmethod(toFunction)
+
+    def __init__(self, code, bind='', prestart=''):
         self.id = globals.objects
         globals.objects += 1
         self.code = code
         self.variable = 'rpython_object_' + str(self.id)
         self.type = run_javascript(String("""
+        {3}
         global.{0} = {1}
         var object = global.{0};
         {2}
@@ -82,12 +242,12 @@ class Object:
         if (global.{0} === null) return 'null';
         if (Array.isArray(global.{0})) return 'array';
         return typeof global.{0};
-        """).replace('{0}', self.variable).replace('{1}', code).replace('{2}', bind).value, returns=True)
+        """).format(self.variable, code, bind, prestart).value, returns=True)
 
     def call(self, *args):
-        if not args: return Object(String('global.{0}()').replace('{0}', self.variable).value)
-        json_args = ', '.join([parse_rpy_json(arg) for arg in args])
-        return Object(String('global.{0}(...[{1}])').replace('{0}', self.variable).replace('{1}', json_args).value)
+        if not args: return Object(String('call()').replace('{0}', self.variable).value, prestart='var call = global.' + self.variable)
+        json_args = ', '.join([json.parse_rpy_json(arg) for arg in list(args)])
+        return Object(String('call(...[{1}])').replace('{0}', self.variable).replace('{1}', json_args).value, prestart='var call = global.' + self.variable)
 
     def __iter__(self):
         keys = Object('Object.keys(global.%s)' % (self.variable))
@@ -101,7 +261,7 @@ class Object:
         return Object('global.%s["%s"]' % (self.variable, key), bind="object = typeof object != 'function' ? object : object.bind(global." + self.variable + ')')
 
     def __setitem__(self, key, value):
-        run_javascript('global.%s["%s"] = %s' % (self.variable, key, parse_rpy_json(value)))
+        run_javascript('global.%s["%s"] = %s' % (self.variable, key, json.parse_rpy_json(value)))
         return
 
     def toString(self):
@@ -132,6 +292,14 @@ class Object:
 
     def toArray(self): #This is basically iter but returns the object just like for of
         return Array(self)
+
+    def toFunction(self):
+        return self.call
+
+    def toReference(self):
+        return 'RPYJSON:global.' + self.variable + ':RPYJSON'
+
+    def toRef(self): return self.toReference()
 
     #def toDict(self): TODO
 
@@ -240,8 +408,9 @@ def asynchronous(function):
     if source[0] == '@':
        source = '#' + source
        first_line = 1
-    if '(self' in source.split('\n')[first_line]: source = source.replace('def ' + name + '(self', 'def ' + name + '(self, rpython_promise, wait, ', 1)
-    else: source = source.replace('def ' + name + '(', 'def ' + name + '(rpython_promise, wait, ', 1)
+    #if '(self' in source.split('\n')[first_line]: source = source.replace('def ' + name + '(self', 'def ' + name + '(self, rpython_promise, wait, ', 1)
+    #else:
+    source = source.replace('def ' + name + '(', 'def ' + name + '(rpython_promise, wait, ', 1)
     source = source.replace('.wait()', '.wait(rpython_promise.awaits, rpython_promise.native_awaits)')
     #print source
     #source = promise_source + '\n' + source
@@ -358,6 +527,8 @@ else:
     exec(template, namespace)
     globals.resolve_next_event = namespace['resolve_next_event']
     return promise.entry
+
+asynchronous_function = asynchronous
 
 @entrypoint_highlevel(key='main', c_name='onresolve', argtypes=[rffi.CCHARP, rffi.CCHARP])
 def onresolve(*args):
