@@ -1,4 +1,12 @@
 from . import stringify
+from json.encoder import ESCAPE_DCT as escapes
+from rpython.rlib.rstring import replace
+
+def encode(value):
+    for escape in reversed(escapes.keys()):
+    #    #value = escapes[escape].join(value.split(escape))
+        value = replace(value, escape, escapes[escape])
+    return '"' + value + '"'
 
 def rpyjson(function):
     def wrapper(value, parse=False):
@@ -13,7 +21,8 @@ def parse_rpy_json(value):
        end = len(value) - 8
        assert end >= 0
        return value[8:end]
-    return '"%s"' % (value)
+    return encode(value)
+    #return '"%s"' % (value.encode('string-escape'))
 
 def rawString(value):
     return 'RPYJSON:' + value + ':RPYJSON'
@@ -21,7 +30,8 @@ def rawString(value):
 @rpyjson
 def fromString(value):
     if value is None: return 'null'
-    return '"%s"' % (value)
+    return encode(value)
+    #return '"%s"' % (value.encode('string-escape'))
 
 fromStr = fromString
 
@@ -48,7 +58,7 @@ def fromDict(value): #string only
     index = 0
     for key in value:
         if index > 0: json += ','
-        json += '"%s":%s' % (key, parse_rpy_json(value[key]))
+        json += ('"%s":' % key) + parse_rpy_json(value[key])
         index += 1
     json += '}'
     return json

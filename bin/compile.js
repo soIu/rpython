@@ -39,7 +39,8 @@ if (process.argv[2] && process.argv[2].indexOf('.py') !== -1) {
   make = make.replace('TARGET = ', 'TARGET = ' + file + '.js #');
   make = make.replace('DEFAULT_TARGET = ', 'DEFAULT_TARGET = ' + file + '.js #');
   fs.writeFileSync(makefile, make);
-  var cores = os.cpus().length
+  var cores = process.env.CORE;
+  if (!cores) cores = os.cpus().filter(function(cpu) {return cpu.speed}).length;
   if (!cores) cores = child_process.execSync('nproc').toString().trim();
   child_process.execSync(['make', '-j', cores].join(' '), {env: process.env, stdio: 'inherit', cwd: directory});
   for (var filename of fs.readdirSync(directory)) {

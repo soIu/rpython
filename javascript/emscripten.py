@@ -6,11 +6,31 @@ from rpython.translator.tool.cbuild import ExternalCompilationInfo
 from rpython.rlib.entrypoint import entrypoint_highlevel
 from rpython.rlib.rstring import replace
 
+decompile = None
+try:
+    import ast_decompiler
+    import tempfile
+    import imp
+    def decompile(code, original, lineno):
+        if original.endswith('.pyc'): original = original[0:-1]
+        code = ast_decompiler.decompile(code)
+        fd, path = tempfile.mkstemp()
+        file = open(path, 'w')
+        file.write('\n'.join([line + ' #File ' + original + ':' + str(lineno) for line in code.splitlines()]))
+        file.seek(0)
+        file.close()
+        #name = path.split('/')[-1]
+        module = imp.load_source('', path)
+        return module
+except:
+    pass
+
 info = ExternalCompilationInfo(includes=['emscripten.h'])
 run_script_string = rffi.llexternal('emscripten_run_script_string', [rffi.CCHARP], rffi.CCHARP, compilation_info=info)
 run_script = rffi.llexternal('emscripten_run_script', [rffi.CCHARP], lltype.Void, compilation_info=info)
 
 def run_javascript(code, returns=False):
+    if globals.collector_id is None: run_garbage_collector()
     code = '(function(global) {' + code + '})(typeof asmGlobalArg !== "undefined" ? asmGlobalArg : this)';
     if returns: return rffi.charp2str(run_script_string(rffi.str2charp(code)))
     run_script(rffi.str2charp(code))
@@ -28,7 +48,7 @@ def rpyobject(function):
 @rpyobject
 def toString(value):
     if value is None: return 'null'
-    return '"%s"' % (value)
+    return json.fromString(value)
 
 toStr = toString
 
@@ -48,7 +68,7 @@ def toBoolean(value):
 
 toBool = toBoolean
 
-functions = []
+functions = {}
 
 function_template = '''
 (function (...args) {
@@ -64,7 +84,8 @@ function_template = '''
 
 def toFunction(function):
     index = globals.functions
-    functions.append(function)
+    functions[index] = function
+    #functions.append(function)
     globals.functions += 1
     return Object(function_template % (index))
 
@@ -80,11 +101,14 @@ def onfunctioncall(*arguments):
     variable, function_id = [rffi.charp2str(pointer) for pointer in pointers]
     for pointer in pointers: lltype.free(pointer, flavor='raw')
     args = Object(variable).toArray()
+    #id = int(function_id)
+    #return
     function = functions[int(function_id)]
     result = function(args=[arg for arg in args]) #if function in decorated_functions else function([arg for arg in args])
     run_javascript('global.rpyfunction_call_' + function_id + ((' = "%s"' % result.variable) if result is not None else ' = null'))
+    globals.collector_id = None
 
-decorated_functions = []
+#decorated_functions = []
 
 def args(function, asynchronous=False, name=None, count=None): #Spread list of Object to each of the argument
     if asynchronous:
@@ -105,10 +129,29 @@ def args(function, asynchronous=False, name=None, count=None): #Spread list of O
     code += indent + 'return rpython_decorated_function(' + args + ')'
     exec(code, namespace)
     function = namespace[name]
-    decorated_functions.append(function)
+    #decorated_functions.append(function)
     return function
 
 function = args
+
+#@function
+def garbage_collector(args):
+    if globals.collector_id is None: return
+    garbage = globals.garbage
+    for variable in garbage:
+        print variable
+        run_javascript('delete global.' + variable)
+        del garbage[variable]
+    #globals.collector_id = None
+    #print 'garbage cleared'
+
+def run_garbage_collector():
+    globals.collector_id = ''
+    if globals.garbage is None: globals.garbage = {}
+    if globals.collector_function is None: globals.collector_function = json.fromFunction(garbage_collector)
+    setTimeout = Object('setTimeout').toFunction()
+    timeout = setTimeout(globals.collector_function, json.fromInteger(0))
+    globals.collector_id = timeout.toString()
 
 method_template = '''
 (function (...args) {
@@ -189,6 +232,9 @@ class Globals:
     functions = 0
     methods = 0
     method_callers = 0
+    garbage = None
+    collector_id = None
+    collector_function = None
 
     def __init__(self):
         self.resolve_next_event = resolve_next_event
@@ -212,7 +258,7 @@ class Array:
 class Error:
 
     def __init__(self, message):
-        run_script(rffi.str2charp('throw new Error("%s")' % message))
+        run_script(rffi.str2charp('throw new Error(`%s`)' % message))
 
 class Object:
 
@@ -257,11 +303,16 @@ class Object:
             objects += [keys[str(index)].toString()]
         return iter(objects)
 
+    def __del__(self):
+        #print 'Garbage collected'
+        #run_javascript('console.log("Garbage collected")\ndelete global.' + self.variable)
+        globals.garbage[self.variable] = True
+
     def __getitem__(self, key):
         return Object('global.%s["%s"]' % (self.variable, key), bind="object = typeof object != 'function' ? object : object.bind(global." + self.variable + ')')
 
     def __setitem__(self, key, value):
-        run_javascript('global.%s["%s"] = %s' % (self.variable, key, json.parse_rpy_json(value)))
+        run_javascript(('global.%s["%s"] = ' % (self.variable, key)) + json.parse_rpy_json(value))
         return
 
     def toString(self):
@@ -340,6 +391,8 @@ def get_variables_cache(variables):
 dummy_tuple = (None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None)
 
 def asynchronous(function):
+    original_file = function.__globals__.get('__file__', "")
+    original_function = function
     function_globals = function.__globals__
     class Waitable(Wait):
 
@@ -405,6 +458,12 @@ def asynchronous(function):
     #if '():' in source.split('\n')[1 if source and source[0] == '@' else 0]: source = source.replace('():', '(wait=None, rpython_promise=None):', 1)
     #else: source = source.replace('):', ', wait=None, rpython_promise=None):', 1)
     first_line = 0
+    if source[0] in [' ', '	']:
+       indents = ''
+       for indent in source:
+           if indent == '@': break
+           indents += indent
+       source = indents.join(source.split(indents)[2:])
     if source[0] == '@':
        source = '#' + source
        first_line = 1
@@ -483,7 +542,7 @@ else:
         current_elif = current_elif.orelse[0]
     #new_function.body += function.body
     #code.body[0] = new_function
-    code = compile(code, filename='', mode='exec')
+    code = compile(code, filename='', mode='exec') if decompile is None else decompile(code, original_file, inspect.getsourcelines(original_function)[1])
     def next_event(promise):
         if promise.native_awaits:
            resolved_all = True
@@ -511,7 +570,10 @@ else:
     namespace = {}
     namespace.update(function_globals)
     namespace.update({'next_event': next_event, 'globals': globals, 'Object': Object, 'rpython_dummy_tuple': dummy_tuple}) #, 'Wait': Wait})
-    exec(code, namespace)
+    if decompile is None: exec(code, namespace)
+    else:
+       code.__dict__.update(namespace)
+       namespace[function.name] = getattr(code, function.name)
     function = namespace[function.name]
     promise = Promise(function, len(groups))
     for variable in last_variables:
@@ -526,7 +588,10 @@ else:
         template += indent + "elif parent_id == '%s': int(child_id) in globals.promise_%s.promises and globals.promise_%s.promises[int(child_id)].next()\n" % (index, index, index)
     exec(template, namespace)
     globals.resolve_next_event = namespace['resolve_next_event']
-    return promise.entry
+    entry = promise.entry
+    def wrapper(*args):
+        return entry(*args)
+    return wrapper
 
 asynchronous_function = asynchronous
 
