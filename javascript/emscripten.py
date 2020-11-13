@@ -29,8 +29,8 @@ info = ExternalCompilationInfo(includes=['emscripten.h'])
 run_script_string = rffi.llexternal('emscripten_run_script_string', [rffi.CCHARP], rffi.CCHARP, compilation_info=info)
 run_script = rffi.llexternal('emscripten_run_script', [rffi.CCHARP], lltype.Void, compilation_info=info)
 
-def run_javascript(code, returns=False):
-    if globals.collector_id is None: run_garbage_collector()
+def run_javascript(code, returns=False, skip_gc=False):
+    if not skip_gc and globals.collector_id is None: run_garbage_collector()
     code = '(function(global) {' + code + '})(typeof asmGlobalArg !== "undefined" ? asmGlobalArg : this)';
     if returns: return rffi.charp2str(run_script_string(rffi.str2charp(code)))
     run_script(rffi.str2charp(code))
@@ -105,8 +105,8 @@ def onfunctioncall(*arguments):
     #return
     function = functions[int(function_id)]
     result = function(args=[arg for arg in args]) #if function in decorated_functions else function([arg for arg in args])
-    run_javascript('global.rpyfunction_call_' + function_id + ((' = "%s"' % result.variable) if result is not None else ' = null'))
-    globals.collector_id = None
+    run_javascript('global.rpyfunction_call_' + function_id + ((' = "%s"' % result.variable) if result is not None else ' = null'), skip_gc=True)
+    #globals.collector_id = None
 
 #decorated_functions = []
 
@@ -138,16 +138,13 @@ function = args
 def garbage_collector(args):
     if globals.collector_id is None: return
     garbage = globals.garbage
-    for variable in garbage:
-        print variable
-        run_javascript('delete global.' + variable)
-        del garbage[variable]
-    #globals.collector_id = None
-    #print 'garbage cleared'
+    for variable in garbage: garbage[variable].free()
+    globals.collector_id = None
 
 def run_garbage_collector():
     globals.collector_id = ''
-    if globals.garbage is None: globals.garbage = {}
+    if globals.garbage is None:
+       globals.garbage = {}
     if globals.collector_function is None: globals.collector_function = json.fromFunction(garbage_collector)
     setTimeout = Object('setTimeout').toFunction()
     timeout = setTimeout(globals.collector_function, json.fromInteger(0))
@@ -264,6 +261,7 @@ class Object:
 
     id = -1
     resolved = True
+    keep_from_gc = False
 
     fromString = staticmethod(toString)
     fromStr = staticmethod(toStr)
@@ -289,11 +287,25 @@ class Object:
         if (Array.isArray(global.{0})) return 'array';
         return typeof global.{0};
         """).format(self.variable, code, bind, prestart).value, returns=True)
+        globals.garbage[self.variable] = self
 
     def call(self, *args):
         if not args: return Object(String('call()').replace('{0}', self.variable).value, prestart='var call = global.' + self.variable)
         json_args = ', '.join([json.parse_rpy_json(arg) for arg in list(args)])
         return Object(String('call(...[{1}])').replace('{0}', self.variable).replace('{1}', json_args).value, prestart='var call = global.' + self.variable)
+
+    def free(self):
+        if self.keep_from_gc: return
+        run_javascript('delete global.' + self.variable)
+        del globals.garbage[self.variable]
+
+    def keep(self):
+        self.keep_from_gc = True
+        return self
+
+    def release(self):
+        self.keep_from_gc = False
+        return self
 
     def __iter__(self):
         keys = Object('Object.keys(global.%s)' % (self.variable))
@@ -302,11 +314,6 @@ class Object:
         for index in range(length):
             objects += [keys[str(index)].toString()]
         return iter(objects)
-
-    def __del__(self):
-        #print 'Garbage collected'
-        #run_javascript('console.log("Garbage collected")\ndelete global.' + self.variable)
-        globals.garbage[self.variable] = True
 
     def __getitem__(self, key):
         return Object('global.%s["%s"]' % (self.variable, key), bind="object = typeof object != 'function' ? object : object.bind(global." + self.variable + ')')
@@ -391,6 +398,9 @@ def get_variables_cache(variables):
 dummy_tuple = (None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None)
 
 def asynchronous(function):
+    def keep_object(object):
+        if isinstance(object, Object): object.keep()
+        return object
     original_file = function.__globals__.get('__file__', "")
     original_function = function
     function_globals = function.__globals__
@@ -484,8 +494,15 @@ def asynchronous(function):
         object = line #{'line': line}
         if isinstance(object, ast.Return):
            returns = True
-           resolve = ast.parse('return rpython_promise.resolve()').body[0]
-           resolve.value.args.append(object.value if object.value is not None else ast.parse('None').body[0].value)
+           resolve = ast.parse('return rpython_promise.resolve()' if object.value is None else 'return rpython_promise.resolve(rpython_keep_object())').body[0]
+           if object.value is None:
+              resolve.value.args.append(object.value if object.value is not None else ast.parse('None').body[0].value)
+           else:
+              resolve.value.args[0].args.append(object.value)
+           #if object.value is not None:
+           #   keep = ast.parse('rpython_keep_object()').body[0]
+           #   keep.value.args.append(object.value)
+           #   groups[-1].append(keep)
            groups[-1].append(resolve)
            break
         else: groups[-1].append(object)
@@ -522,6 +539,12 @@ def asynchronous(function):
             objects += [object]
         current_elif.body = objects
         if not current_elif.orelse:
+           return_object = current_elif.body[0]
+           objects = []
+           for variable in last_variables:
+               objects.append(ast.parse('if isinstance({0}, Object): {0}.release()'.format(variable)).body[0])
+           objects.append(return_object)
+           current_elif.body = objects
            #last_variables = None
            break
         else:
@@ -535,6 +558,7 @@ if isinstance({0}, tuple) and len({0}) == 99 and {0}[0] is not None:
    {0}[0].promise_id, {0}[0].parent_id = rpython_promise.id, rpython_promise.parent.id
    rpython_promise.promise_{0} = {0}
 else:
+   if isinstance({0}, Object): {0}.keep()
    rpython_promise.var_{0} = {0}
                   '''.format(variable)).body[0])
               #objects.append(ast.parse(get_variables_cache(variables) + ' = ' + get_variables_name(variables)).body[0])
@@ -569,7 +593,7 @@ else:
         """ % (promise.parent.id, promise.id, '[' + ', '.join(['"%s"' % object.variable for object in promise.awaits]) + ']'))
     namespace = {}
     namespace.update(function_globals)
-    namespace.update({'next_event': next_event, 'globals': globals, 'Object': Object, 'rpython_dummy_tuple': dummy_tuple}) #, 'Wait': Wait})
+    namespace.update({'next_event': next_event, 'globals': globals, 'Object': Object, 'rpython_keep_object': keep_object, 'rpython_dummy_tuple': dummy_tuple}) #, 'Wait': Wait})
     if decompile is None: exec(code, namespace)
     else:
        code.__dict__.update(namespace)
