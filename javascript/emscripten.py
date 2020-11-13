@@ -31,7 +31,7 @@ run_script = rffi.llexternal('emscripten_run_script', [rffi.CCHARP], lltype.Void
 
 def run_javascript(code, returns=False, skip_gc=False):
     if not skip_gc and globals.collector_id is None: run_garbage_collector()
-    code = '(function(global) {' + code + '})(typeof asmGlobalArg !== "undefined" ? asmGlobalArg : this)';
+    code = '(function(global) {' + code + '})(typeof rpyGlobalArg !== "undefined" ? rpyGlobalArg : this)';
     if returns: return rffi.charp2str(run_script_string(rffi.str2charp(code)))
     run_script(rffi.str2charp(code))
     return None
@@ -76,22 +76,31 @@ function_template = '''
   var index = %s;
   var variable = 'global.rpyfunction_call_args[' + index + ']';
   global.rpyfunction_call_args[index] = args;
-  args = [variable, index.toString()].map(function (string) {return allocate(intArrayFromString(string), 'i8', ALLOC_NORMAL)});
+  args = [variable, index.toString()].map(function (string) {return allocate.length === 2 ? allocate(intArrayFromString(string), ALLOC_NORMAL) : allocate(intArrayFromString(string), 'i8', ALLOC_NORMAL)});
   Module.asm.onfunctioncall(...args);
-  return global[global['rpyfunction_call_' + index]];
+  delete global.rpyfunction_call_args[index];
+  var result = global[global['rpyfunction_call_' + index]];
+  delete global['rpyfunction_call_' + index];
+  return result;
 });
 '''
 
-def toFunction(function):
+def toFunction(function, keep=False):
+    #if globals.functions_cache is None:
+    #   globals.functions_cache = {}
+    #if function in globals.functions_cache: return globals.functions_cache[function]
     index = globals.functions
     functions[index] = function
     #functions.append(function)
     globals.functions += 1
-    return Object(function_template % (index))
+    object =  Object(function_template % (index))
+    if keep: object.keep()
+    #globals.functions_cache[function] = object
+    return object
 
-def fromFunction(function=None):
+def fromFunction(function=None, keep=False):
     if function is None: return 'RPYJSON:null:RPYJSON'
-    return toFunction(function).toRef()
+    return toFunction(function, keep=keep).toRef()
 
 def Function(): return fromFunction
 
@@ -145,7 +154,8 @@ def run_garbage_collector():
     globals.collector_id = ''
     if globals.garbage is None:
        globals.garbage = {}
-    if globals.collector_function is None: globals.collector_function = json.fromFunction(garbage_collector)
+    #if globals.collector_function is None:
+    globals.collector_function = json.fromFunction(garbage_collector)
     setTimeout = Object('setTimeout').toFunction()
     timeout = setTimeout(globals.collector_function, json.fromInteger(0))
     globals.collector_id = timeout.toString()
@@ -156,9 +166,12 @@ method_template = '''
   var index = %s;
   var variable = 'global.rpymethod_call_args[' + index + ']';
   global.rpymethod_call_args[index] = args;
-  args = [variable, index.toString()].map(function (string) {return allocate(intArrayFromString(string), 'i8', ALLOC_NORMAL)});
+  args = [variable, index.toString()].map(function (string) {return allocate.length === 2 ? allocate(intArrayFromString(string), ALLOC_NORMAL) : allocate(intArrayFromString(string), 'i8', ALLOC_NORMAL)});
   Module.asm.onmethodcall%s(...args);
-  return global[global['rpymethod_call_' + index]];
+  delete global.rpymethod_call_args[index];
+  var result = global[global['rpymethod_call_' + index]];
+  delete global['rpymethod_call_' + index];
+  return result;
 });
 '''
 
@@ -174,12 +187,22 @@ def fromMethod():
         method = methods[int(method_id)]
         result = method(args=[arg for arg in args])
         run_javascript('global.rpymethod_call_' + method_id + ((' = "%s"' % result.variable) if result is not None else ' = null'))
-    def Method(method):
+
+    #class Cache:
+    #    methods = None
+
+    #cache = Cache()
+    def Method(method, keep=False):
         if method is None: return 'RPYJSON:null:RPYJSON'
+        #if cache.methods is None:
+        #   cache.methods = {}
+        #if method in cache.methods: return cache.methods[method]
         globals.methods += 1
         methods[globals.methods] = method
         object = Object(method_template % (globals.methods, globals.method_callers))
-        return object.toRef()
+        if keep: object.keep()
+        #cache.methods[method] = object.toRef()
+        return object.toRef() #cache.methods[method]
     return Method
 
 Method = fromMethod
@@ -227,7 +250,9 @@ class Globals:
     promises = 0
     objects = 0
     functions = 0
+    functions_cache = None
     methods = 0
+    methods_cache = None
     method_callers = 0
     garbage = None
     collector_id = None
@@ -539,8 +564,8 @@ def asynchronous(function):
             objects += [object]
         current_elif.body = objects
         if not current_elif.orelse:
-           return_object = current_elif.body[0]
-           objects = []
+           return_object = current_elif.body[-1]
+           objects = current_elif.body[0:-1]
            for variable in last_variables:
                objects.append(ast.parse('if isinstance({0}, Object): {0}.release()'.format(variable)).body[0])
            objects.append(return_object)
@@ -583,13 +608,13 @@ else:
               return
         if promise.native_awaits and not promise.awaits: return
         run_javascript("""
-        var args = ['%s', '%s'].map(function (string) {return allocate(intArrayFromString(string), 'i8', ALLOC_NORMAL)});
+        var args = ['%s', '%s'].map(function (string) {return allocate.length === 2 ? allocate(intArrayFromString(string), ALLOC_NORMAL) : allocate(intArrayFromString(string), 'i8', ALLOC_NORMAL)});
         Promise.all(%s.map(async function (variable) {
           var object = await global[variable];
           global[variable] = object;
         })).then(function () {
           Module.asm.onresolve(...args);
-        }).catch(function (error) {console.error(error) /*|| throw error*/});
+        }) //.catch(function (error) {console.error(error) /*|| throw error*/});
         """ % (promise.parent.id, promise.id, '[' + ', '.join(['"%s"' % object.variable for object in promise.awaits]) + ']'))
     namespace = {}
     namespace.update(function_globals)

@@ -46,4 +46,10 @@ if (process.argv[2] && process.argv[2].indexOf('.py') !== -1) {
   for (var filename of fs.readdirSync(directory)) {
     if (filename.startsWith(file + '.')) fs.copyFileSync(path.join(directory, filename), path.join(process.cwd(), filename));
   }
+  try {
+    fs.appendFileSync(path.join(process.cwd(), file + '.js' ), '\nvar rpyGlobalArg = {};');
+  }
+  catch (error) {
+    console.warn(error);
+  }
 }
