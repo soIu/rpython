@@ -18,6 +18,24 @@ function check_exist(command, dont_append_version) {
   }
 }
 
+function deserialize_rpython_json(object) {
+  var global = typeof rpyGlobalArg !== "undefined" ? rpyGlobalArg : this;
+  if (Array.isArray(object)) object.forEach(function (each, index) {
+    if (Array.isArray(each)) deserialize_rpython_json(each);
+    else if (each && typeof each === 'object') deserialize_rpython_json(each);
+    else if (typeof each === 'string' && each.startsWith('RPYJSOBJECT:') && each.endsWith(':RPYJSOBJECT')) object[index] = global[each.slice(12, -12)];
+    else if (each && typeof each === 'object') deserialize_rpython_json(each);
+  });
+  else if (typeof object === 'string' && object.startsWith('RPYJSOBJECT:') && object.endsWith(':RPYJSOBJECT')) object = global[object.slice(12, -12)];
+  else if (object && typeof object === 'object') for (var key in object) {
+    var each = object[key];
+    if (Array.isArray(each)) deserialize_rpython_json(each);
+    else if (typeof each === 'string' && each.startsWith('RPYJSOBJECT:') && each.endsWith(':RPYJSOBJECT')) object[key] = global[each.slice(12, -12)];
+    else if (each && typeof each === 'object') deserialize_rpython_json(each);
+  }
+  return object;
+}
+
 var python = 'pypy';
 if (!check_exist('pypy')) {
   python = 'python2.7';
@@ -47,7 +65,7 @@ if (process.argv[2] && process.argv[2].indexOf('.py') !== -1) {
     if (filename.startsWith(file + '.')) fs.copyFileSync(path.join(directory, filename), path.join(process.cwd(), filename));
   }
   try {
-    fs.appendFileSync(path.join(process.cwd(), file + '.js' ), '\nvar rpyGlobalArg = {};');
+    fs.appendFileSync(path.join(process.cwd(), file + '.js' ), '\n' + deserialize_rpython_json.toString() + '\nvar rpyGlobalArg = {"deserialize_rpython_json": deserialize_rpython_json};\nrpyGlobalArg.global = rpyGlobalArg;\n if (typeof window !== "undefined") rpyGlobalArg.window = window;\n if (typeof require !== "undefined") rpyGlobalArg.require = require;\n if (typeof self !== "undefined") rpyGlobalArg.self = self;');
   }
   catch (error) {
     console.warn(error);
