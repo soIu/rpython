@@ -40,7 +40,7 @@ em_js = """
 
 EM_JS(const char*, run_safe_json, (const char* json, const char* variable), {
   var global = typeof rpyGlobalArg !== "undefined" ? rpyGlobalArg : this;
-  variable = UTF8ToString(varible);
+  variable = UTF8ToString(variable);
   var object = JSON.parse(UTF8ToString(json));
   object = global.deserialize_rpython_json(object);
   try {
