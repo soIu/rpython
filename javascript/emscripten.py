@@ -47,7 +47,7 @@ EM_JS(const char*, run_safe_json, (const char* json, const char* variable), {
     global[variable] = object;
   }
   catch (error) {
-    console.error('Trying to get variable ' + variable);
+    console.error('Trying to set variable ' + variable);
     throw error;
   }
   var type;
@@ -126,7 +126,14 @@ EM_JS(const char*, run_safe_call, (const char* variable, const char* args, const
     console.error('Trying to get variable ' + variable);
     throw error;
   }
-  var object = call(...args);
+  var object;
+  try {
+    object = call(...args);
+  }
+  catch (error) {
+   console.error('Trying to call variable ' + variable');
+   throw error;
+  }
   global[new_variable] = object;
   var type;
   if (object === null) type = 'null';
