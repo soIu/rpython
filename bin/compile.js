@@ -5,6 +5,8 @@ var path = require('path');
 var process = require('process');
 var child_process = require('child_process');
 var rpython = path.join(__dirname, 'rpython');
+var rpydir = path.join(rpython, '../..')
+var platform = os.platform();
 
 process.env.RPY_USE_EMSCRIPTEN = 'true';
 
@@ -16,6 +18,17 @@ function check_exist(command, dont_append_version) {
   catch (error) {
     return false;
   }
+}
+
+function cygpath(fullpath) {
+  return child_process.execSync("cygpath '" + fullpath + "'").toString().trim();
+}
+
+if (platform === 'win32') {
+  if (!check_exist('cygpath')) {
+    throw new Error("Currently the only possible way to compile WASM RPython programs on Windows is with Cygwin, make sure to install python2.7, gcc-core and make on the Cygwin installer. And delete /usr/bin/python on Cygwin (It interferes with emscripten's Python 3)");
+  }
+  rpython = cygpath(rpython);
 }
 
 function deserialize_rpython_json(object) {
@@ -36,6 +49,7 @@ function deserialize_rpython_json(object) {
   return object;
 }
 
+var emcc = platform === 'win32' ? 'emcc.bat' : 'emcc';
 var python = 'pypy';
 if (!check_exist('pypy')) {
   python = 'python2.7';
@@ -43,10 +57,10 @@ if (!check_exist('pypy')) {
 }
 if (!check_exist('make -v', true)) throw new Error('make (usually comes from build-essential, or just install the standalone package) must be installed and exist on PATH');
 //if (!check_exist('gcc -v', true)) console.error('GCC (gcc) is somewhat needed, but not necessary');
-if (!check_exist('emcc -v', true)) throw new Error('emcc (comes with emsdk) must be installed and exist on PATH');
-var tempdir = path.join(os.tmpdir(), 'rpython-' + (new Date()).toISOString());
+if (!check_exist(emcc + ' -v', true)) throw new Error('emcc (comes with emsdk) must be installed and exist on PATH');
+var tempdir = path.join(os.tmpdir(), 'rpython-' + (new Date()).getTime());
 fs.mkdirSync(tempdir);
-process.env.PYPY_USESSION_DIR = tempdir;
+process.env.PYPY_USESSION_DIR = platform === 'win32' ? cygpath(tempdir) : tempdir;
 process.env.USER = 'current';
 child_process.execSync([python, rpython, '--gc=none', '-s'].concat(process.argv.slice(2)).join(' '), {stdio: 'inherit', env: process.env});
 if (process.argv[2] && process.argv[2].indexOf('.py') !== -1) {
@@ -55,8 +69,10 @@ if (process.argv[2] && process.argv[2].indexOf('.py') !== -1) {
   var makefile = path.join(directory, 'Makefile');
   var make = fs.readFileSync(makefile).toString();
   if (process.argv.indexOf('--use-pthread') === -1) make = make.replace(/-pthread/g, '');
+  if (platform === 'win32') make = make.replace('RPYDIR = ', 'RPYDIR = "' + rpydir + '"#')
   make = make.replace(/-lutil/g, '');
-  make = make.replace('CC = ', 'CC = emcc -s ALLOW_MEMORY_GROWTH=1 #');
+  make = make.replace(/--export-all-symbols/g, '--export-dynamic');
+  make = make.replace('CC = ', 'CC = ' + emcc + ' -s ALLOW_MEMORY_GROWTH=1 #');
   make = make.replace('TARGET = ', 'TARGET = ' + file + '.js #');
   make = make.replace('DEFAULT_TARGET = ', 'DEFAULT_TARGET = ' + file + '.js #');
   fs.writeFileSync(makefile, make);
