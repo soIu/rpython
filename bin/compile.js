@@ -44,11 +44,14 @@ if (!check_exist('pypy')) {
 if (!check_exist('make -v', true)) throw new Error('make (usually comes from build-essential, or just install the standalone package) must be installed and exist on PATH');
 //if (!check_exist('gcc -v', true)) console.error('GCC (gcc) is somewhat needed, but not necessary');
 if (!check_exist('emcc -v', true)) throw new Error('emcc (comes with emsdk) must be installed and exist on PATH');
+var tempdir = path.join(os.tmpdir(), 'rpython-' + (new Date()).toISOString());
+fs.mkdirSync(tempdir);
+process.env.PYPY_USESSION_DIR = tempdir;
 process.env.USER = 'current';
 child_process.execSync([python, rpython, '--gc=none', '-s'].concat(process.argv.slice(2)).join(' '), {stdio: 'inherit', env: process.env});
 if (process.argv[2] && process.argv[2].indexOf('.py') !== -1) {
   var file = process.argv[2].split('.py')[0];
-  var directory = path.join(os.tmpdir(), 'usession-unknown-current', 'testing_1');
+  var directory = path.join(tempdir, 'usession-unknown-0', 'testing_1');
   var makefile = path.join(directory, 'Makefile');
   var make = fs.readFileSync(makefile).toString();
   if (process.argv.indexOf('--use-pthread') === -1) make = make.replace(/-pthread/g, '');
@@ -66,6 +69,12 @@ if (process.argv[2] && process.argv[2].indexOf('.py') !== -1) {
   }
   try {
     fs.appendFileSync(path.join(process.cwd(), file + '.js' ), '\n' + deserialize_rpython_json.toString() + '\nvar rpyGlobalArg = {"deserialize_rpython_json": deserialize_rpython_json};\nrpyGlobalArg.global = rpyGlobalArg;\n if (typeof window !== "undefined") rpyGlobalArg.window = window;\n if (typeof require !== "undefined") rpyGlobalArg.require = require;\n if (typeof self !== "undefined") rpyGlobalArg.self = self;');
+    try {
+      fs.rmdirSync(tempdir, {recursive: true});
+    }
+    catch (error) {
+      child_process.execSync('rm -rf ' + tempdir);
+    }
   }
   catch (error) {
     console.warn(error);
