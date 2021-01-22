@@ -62,6 +62,9 @@ var tempdir = path.join(os.tmpdir(), 'rpython-' + (new Date()).getTime());
 fs.mkdirSync(tempdir);
 process.env.PYPY_USESSION_DIR = platform === 'win32' ? cygpath(tempdir) : tempdir;
 process.env.USER = 'current';
+if (platform === 'darwin') {
+  process.env.C_INCLUDE_PATH = path.join(__dirname, 'dmidecode');
+}
 child_process.execSync([python, rpython, '--gc=none', '-s'].concat(process.argv.slice(2)).join(' '), {stdio: 'inherit', env: process.env});
 if (process.argv[2] && process.argv[2].indexOf('.py') !== -1) {
   var file = process.argv[2].split('.py')[0];

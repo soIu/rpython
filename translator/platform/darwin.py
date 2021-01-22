@@ -14,7 +14,7 @@ DARWIN_VERSION_MIN = '-mmacosx-version-min=10.7'
 class Darwin(posix.BasePosix):
     name = "darwin"
 
-    standalone_only = ('-mdynamic-no-pic',)
+    standalone_only = () #'-mdynamic-no-pic',)
     shared_only = ()
 
     link_flags = (DARWIN_VERSION_MIN,)
