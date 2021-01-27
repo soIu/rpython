@@ -29,4 +29,6 @@ extern const char* get_float(const char* variable);
 
 extern const char* get_boolean(const char* variable);
 
+extern const char* run_unsafe_code(const char* code);
+
 #endif

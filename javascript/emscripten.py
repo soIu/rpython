@@ -131,7 +131,7 @@ EM_JS(const char*, run_safe_call, (const char* variable, const char* args, const
     object = call(...args);
   }
   catch (error) {
-   console.error('Trying to call variable ' + variable');
+   console.error('Trying to call variable ' + variable);
    throw error;
   }
   global[new_variable] = object;
@@ -312,6 +312,16 @@ EM_JS(const char*, get_boolean, (const char* variable), {
   return stringOnWasmHeap;
 });
 
+EM_JS(const char*, run_unsafe_code, (const char* code), {
+  code = UTF8ToString(code);
+  var global = typeof rpyGlobalArg !== "undefined" ? rpyGlobalArg : this;
+  var result = String(eval(code));
+  var lengthBytes = lengthBytesUTF8(result) + 1;
+  var stringOnWasmHeap = _malloc(lengthBytes);
+  stringToUTF8(result, stringOnWasmHeap, lengthBytes);
+  return stringOnWasmHeap;
+});
+
 """
 def rffi_1(function, void=False):
     def wrapper(arg1, skip_gc=False):
@@ -353,6 +363,8 @@ run_safe_call = rffi_3(rffi.llexternal('run_safe_call', [rffi.CCHARP, rffi.CCHAR
 run_safe_promise = rffi_3(rffi.llexternal('run_safe_promise', [rffi.CCHARP, rffi.CCHARP, rffi.CCHARP], lltype.Void, compilation_info=info), void=True)
 run_safe_type_update = rffi_1(rffi.llexternal('run_safe_type_update', [rffi.CCHARP], rffi.CCHARP, compilation_info=info))
 
+run_unsafe_code = rffi_1(rffi.llexternal('run_unsafe_code', [rffi.CCHARP], rffi.CCHARP, compilation_info=info))
+
 create_function = rffi_2(rffi.llexternal('create_function', [rffi.CCHARP, rffi.CCHARP], rffi.CCHARP, compilation_info=info))
 create_method = rffi_3(rffi.llexternal('create_method', [rffi.CCHARP, rffi.CCHARP, rffi.CCHARP], rffi.CCHARP, compilation_info=info))
 create_js_closure = rffi_3(rffi.llexternal('create_js_closure', [rffi.CCHARP, rffi.CCHARP, rffi.CCHARP], rffi.CCHARP, compilation_info=info))
@@ -364,14 +376,15 @@ get_boolean = rffi_1(rffi.llexternal('get_boolean', [rffi.CCHARP], rffi.CCHARP, 
 
 def run_javascript(code, returns=False, skip_gc=False):
     if not skip_gc and globals.collector_id is None: run_garbage_collector()
-    code = '(function(global) {' + code + '})(typeof rpyGlobalArg !== "undefined" ? rpyGlobalArg : this)';
-    if returns:
+    code = '(function(global) {' + code + '})(global /*typeof rpyGlobalArg !== "undefined" ? rpyGlobalArg : this*/)'
+    return run_unsafe_code(code)
+    """if returns:
        pointer = run_script_string(rffi.str2charp(code))
        result = rffi.charp2str(pointer)
        lltype.free(pointer, flavor='raw')
        return result
     run_script(rffi.str2charp(code))
-    return None
+    return None"""
 
 def resolve_next_event(parent_id, child_id): return
 
