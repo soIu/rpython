@@ -87,7 +87,7 @@ if (process.argv[2] && process.argv[2].indexOf('.py') !== -1) {
     if (filename.startsWith(file + '.')) fs.copyFileSync(path.join(directory, filename), path.join(process.cwd(), filename));
   }
   try {
-    fs.appendFileSync(path.join(process.cwd(), file + '.js' ), '\n' + deserialize_rpython_json.toString() + '\nvar rpyGlobalArg = {"deserialize_rpython_json": deserialize_rpython_json};\nrpyGlobalArg.global = rpyGlobalArg;\n if (typeof window !== "undefined") rpyGlobalArg.window = window;\n if (typeof require !== "undefined") rpyGlobalArg.require = require;\n if (typeof self !== "undefined") rpyGlobalArg.self = self;');
+    fs.appendFileSync(path.join(process.cwd(), file + '.js' ), '\n' + deserialize_rpython_json.toString() + '\nvar rpyGlobalArg = {"Module": Module, "deserialize_rpython_json": deserialize_rpython_json};\nrpyGlobalArg.global = rpyGlobalArg;\n if (typeof window !== "undefined") rpyGlobalArg.window = window;\n if (typeof require !== "undefined") rpyGlobalArg.require = require;\n if (typeof self !== "undefined") rpyGlobalArg.self = self;');
     try {
       fs.rmdirSync(tempdir, {recursive: true});
     }

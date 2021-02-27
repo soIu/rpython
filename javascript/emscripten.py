@@ -315,7 +315,7 @@ EM_JS(const char*, get_boolean, (const char* variable), {
 EM_JS(const char*, run_unsafe_code, (const char* code), {
   code = UTF8ToString(code);
   var global = typeof rpyGlobalArg !== "undefined" ? rpyGlobalArg : this;
-  var result = String(eval(code)(global));
+  var result = String(eval(code)(Module, global));
   var lengthBytes = lengthBytesUTF8(result) + 1;
   var stringOnWasmHeap = _malloc(lengthBytes);
   stringToUTF8(result, stringOnWasmHeap, lengthBytes);
@@ -376,7 +376,7 @@ get_boolean = rffi_1(rffi.llexternal('get_boolean', [rffi.CCHARP], rffi.CCHARP, 
 
 def run_javascript(code, returns=False, skip_gc=False):
     if not skip_gc and globals.collector_id is None: run_garbage_collector()
-    code = '(function(global) {' + code + '})'
+    code = '(function(Module, global) {' + code + '})'
     return run_unsafe_code(code)
     """if returns:
        pointer = run_script_string(rffi.str2charp(code))
