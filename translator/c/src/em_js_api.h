@@ -11,6 +11,8 @@ extern void run_safe_del(const char* variable, const char* key);
 
 extern const char* run_safe_call(const char* variable, const char* args, const char* new_variable);
 
+extern const char* run_safe_new(const char* variable, const char* args, const char* new_variable);
+
 extern void run_safe_promise(const char* arg1, const char* arg2, const char* arg3);
 
 extern const char* create_function(const char* id, const char* new_variable);

@@ -145,6 +145,39 @@ EM_JS(const char*, run_safe_call, (const char* variable, const char* args, const
   return stringOnWasmHeap;
 });
 
+EM_JS(const char*, run_safe_new, (const char* variable, const char* args, const char* new_variable), {
+  var global = typeof rpyGlobalArg !== "undefined" ? rpyGlobalArg : this;
+  variable = UTF8ToString(variable);
+  args = JSON.parse(UTF8ToString(args));
+  new_variable = UTF8ToString(new_variable);
+  deserialize_rpython_json(args);
+  var constructor;
+  try {
+    constructor = global[variable];
+  }
+  catch (error) {
+    console.error('Trying to get variable ' + variable);
+    throw error;
+  }
+  var object;
+  try {
+    object = new constructor(...args);
+  }
+  catch (error) {
+   console.error('Trying to instantiate variable ' + variable);
+   throw error;
+  }
+  global[new_variable] = object;
+  var type;
+  if (object === null) type = 'null';
+  if (Array.isArray(object)) type = 'array';
+  else type = typeof object;
+  var lengthBytes = lengthBytesUTF8(type) + 1;
+  var stringOnWasmHeap = _malloc(lengthBytes);
+  stringToUTF8(type, stringOnWasmHeap, lengthBytes);
+  return stringOnWasmHeap;
+});
+
 EM_JS(void, run_safe_promise, (const char* parent_promise_id, const char* promise_id, const char* variables), {
   var global = typeof rpyGlobalArg !== "undefined" ? rpyGlobalArg : this;
   var args = [UTF8ToString(parent_promise_id), UTF8ToString(promise_id)].map(function (string) {return allocate.length === 2 ? allocate(intArrayFromString(string), ALLOC_NORMAL) : allocate(intArrayFromString(string), 'i8', ALLOC_NORMAL)});
@@ -360,6 +393,7 @@ run_safe_get = rffi_3(rffi.llexternal('run_safe_get', [rffi.CCHARP, rffi.CCHARP,
 run_safe_set = rffi_3(rffi.llexternal('run_safe_set', [rffi.CCHARP, rffi.CCHARP, rffi.CCHARP], lltype.Void, compilation_info=info), void=True)
 run_safe_del = rffi_2(rffi.llexternal('run_safe_del', [rffi.CCHARP, rffi.CCHARP], lltype.Void, compilation_info=info), void=True)
 run_safe_call = rffi_3(rffi.llexternal('run_safe_call', [rffi.CCHARP, rffi.CCHARP, rffi.CCHARP], rffi.CCHARP, compilation_info=info))
+run_safe_new = rffi_3(rffi.llexternal('run_safe_new', [rffi.CCHARP, rffi.CCHARP, rffi.CCHARP], rffi.CCHARP, compilation_info=info))
 run_safe_promise = rffi_3(rffi.llexternal('run_safe_promise', [rffi.CCHARP, rffi.CCHARP, rffi.CCHARP], lltype.Void, compilation_info=info), void=True)
 run_safe_type_update = rffi_1(rffi.llexternal('run_safe_type_update', [rffi.CCHARP], rffi.CCHARP, compilation_info=info))
 
@@ -657,7 +691,7 @@ class Object:
     fromFunction = staticmethod(toFunction)
     createClosure = staticmethod(create_closure)
 
-    def __init__(self, code, bind='', prestart='', safe_json=False, safe_get="", safe_call="", safe_function=False, safe_method=0, safe_closure_args=None):
+    def __init__(self, code, bind='', prestart='', safe_json=False, safe_get="", safe_call="", safe_new=str(), safe_function=False, safe_method=0, safe_closure_args=None):
         self.id = globals.objects
         globals.objects += 1
         self.code = code
@@ -668,6 +702,8 @@ class Object:
            self.type = run_safe_get(code, safe_get, self.variable)
         elif safe_call:
            self.type = run_safe_call(safe_call, code, self.variable)
+        elif safe_new:
+           self.type = run_safe_new(safe_new, code, self.variable)
         elif safe_function:
            self.type = create_function(code, self.variable)
         elif safe_method:
@@ -694,6 +730,10 @@ class Object:
         for key in keys:
             object = object[key]
         return object
+
+    def new(self, *args):
+        json_args = '[' + ', '.join([json.parse_rpy_json(arg) for arg in list(args)]) + ']'
+        return Object(json_args, safe_new=self.variable)
 
     def call(self, *args):
         #if not args: return Object(String('call()').replace('{0}', self.variable).value, prestart='var call = global.' + self.variable)
