@@ -680,7 +680,7 @@ class Error:
         run_script(rffi.str2charp('throw new Error(`%s`)' % message))
 
 def create_closure(function, *objects):
-    object = Object(JSON.fromFunction(function), safe_closure_args=[object for object in list(objects)])
+    object = Object(JSON.fromFunction(function), safe_closure_args=[object.toRef() for object in list(objects)])
     return object
 
 class Object:
