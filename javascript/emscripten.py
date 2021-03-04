@@ -452,6 +452,14 @@ def toBoolean(value):
 
 toBool = toBoolean
 
+@rpyobject
+def toList(value):
+    return json.fromList(value)
+
+@rpyobject
+def toDict(value):
+    return json.fromDict(value)
+
 functions = {}
 
 function_template = '''
@@ -688,6 +696,8 @@ class Object:
     fromFloat = staticmethod(toFloat)
     fromBoolean = staticmethod(toBoolean)
     fromBool = staticmethod(toBool)
+    fromList = staticmethod(toList)
+    fromDict = staticmethod(toDict)
     fromFunction = staticmethod(toFunction)
     createClosure = staticmethod(create_closure)
 
