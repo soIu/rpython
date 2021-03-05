@@ -61,8 +61,11 @@ if (!check_exist(emcc + ' -v', true)) throw new Error('emcc (comes with emsdk) m
 var tempdir = path.join(os.tmpdir(), 'rpython-' + (new Date()).getTime());
 fs.mkdirSync(tempdir);
 process.env.PYPY_USESSION_DIR = platform === 'win32' ? cygpath(tempdir) : tempdir;
+if (!process.env.C_INCLUDE_PATH) process.env.C_INCLUDE_PATH = '';
+else process.env.C_INCLUDE_PATH += ':';
+process.env.C_INCLUDE_PATH += path.join(__dirname, '../boehm');
 process.env.USER = 'current';
-child_process.execSync([python, rpython, '--gc=none', '-s'].concat(process.argv.slice(2)).join(' '), {stdio: 'inherit', env: process.env});
+child_process.execSync([python, rpython, '--gc=boehm', '-s'].concat(process.argv.slice(2)).join(' '), {stdio: 'inherit', env: process.env});
 if (process.argv[2] && process.argv[2].indexOf('.py') !== -1) {
   var file = process.argv[2].split('.py')[0];
   var directory = path.join(tempdir, 'usession-unknown-0', 'testing_1');
@@ -71,16 +74,18 @@ if (process.argv[2] && process.argv[2].indexOf('.py') !== -1) {
   if (process.argv.indexOf('--use-pthread') === -1) make = make.replace(/-pthread/g, '');
   if (platform === 'win32') make = make.replace('RPYDIR = ', 'RPYDIR = "' + rpydir + '"#')
   make = make.replace(/-lutil/g, '');
+  make = make.replace(/-lgc/g, '');
   make = make.replace(/--export-all-symbols/g, '--export-dynamic');
   make = make.replace('CC = ', 'CC = ' + emcc + ' -s ALLOW_MEMORY_GROWTH=1 #');
   make = make.replace('TARGET = ', 'TARGET = ' + file + '.js #');
   make = make.replace('DEFAULT_TARGET = ', 'DEFAULT_TARGET = ' + file + '.js #');
+  make = make.replace('$(LIBDIRS) $(LIBS) $(LINKFILES) $(LDFLAGS)', path.join(__dirname, '../boehm/gc.a') + ' $(LIBDIRS) $(LIBS) $(LINKFILES) $(LDFLAGS)');
   fs.writeFileSync(makefile, make);
   var cores = process.env.CORE;
   if (!cores) cores = os.cpus().filter(function(cpu) {return cpu.speed}).length;
   if (!cores) cores = child_process.execSync('nproc').toString().trim();
   if (platform === 'darwin') {
-    process.env.C_INCLUDE_PATH = path.join(__dirname, '../dmidecode');
+    process.env.C_INCLUDE_PATH += ':' + path.join(__dirname, '../dmidecode');
   }
   child_process.execSync(['make', '-j', cores].join(' '), {env: process.env, stdio: 'inherit', cwd: directory});
   for (var filename of fs.readdirSync(directory)) {
