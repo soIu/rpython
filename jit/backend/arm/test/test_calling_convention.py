@@ -10,13 +10,17 @@ from rpython.jit.backend.arm.codebuilder import InstrBuilder
 from rpython.jit.backend.arm import registers as r
 from rpython.jit.backend.arm.test.support import skip_unless_run_slow_tests
 from rpython.jit.backend.arm.test.test_runner import boxfloat, constfloat
-from rpython.jit.metainterp.resoperation import rop, InputArgInt, InputArgFloat
-from rpython.jit.metainterp.history import JitCellToken
+from rpython.jit.metainterp.resoperation import ResOperation, rop
+from rpython.jit.metainterp.history import (AbstractFailDescr,
+                                         AbstractDescr,
+                                         BasicFailDescr,
+                                         BasicFinalDescr,
+                                         BoxInt, Box, BoxPtr,
+                                         JitCellToken, TargetToken,
+                                         ConstInt, ConstPtr,
+                                         BoxFloat, ConstFloat)
 
 skip_unless_run_slow_tests()
-
-boxint = InputArgInt
-boxfloat = InputArgFloat.fromfloat
 
 class TestARMCallingConvention(CallingConvTests):
     # ../../test/calling_convention_test.py
@@ -78,9 +82,9 @@ class TestARMCallingConvention(CallingConvTests):
                                     EffectInfo.MOST_GENERAL)
         funcbox = self.get_funcbox(cpu, func_ptr)
         args = ([boxfloat(.1) for i in range(7)] +
-                [boxint(1), boxfloat(.2), boxint(2), boxfloat(.3),
+                [BoxInt(1), boxfloat(.2), BoxInt(2), boxfloat(.3),
                  boxfloat(.4)])
-        res = self.execute_operation(rop.CALL_F,
+        res = self.execute_operation(rop.CALL,
                                      [funcbox] + args,
                                      'float', descr=calldescr)
         for i,j in enumerate(callargs[0]):
@@ -108,7 +112,7 @@ class TestARMCallingConvention(CallingConvTests):
                                     EffectInfo.MOST_GENERAL)
         funcbox = self.get_funcbox(cpu, func_ptr)
         args = ([boxfloat(.1) for i in range(10)])
-        res = self.execute_operation(rop.CALL_F,
+        res = self.execute_operation(rop.CALL,
                                      [funcbox] + args,
                                      'float', descr=calldescr)
         for i,j in enumerate(callargs[0]):
@@ -130,8 +134,8 @@ class TestARMCallingConvention(CallingConvTests):
         calldescr = cpu.calldescrof(FUNC, FUNC.ARGS, FUNC.RESULT,
                                     EffectInfo.MOST_GENERAL)
         funcbox = self.get_funcbox(cpu, func_ptr)
-        args = ([boxint(1) for i in range(10)])
-        res = self.execute_operation(rop.CALL_I,
+        args = ([BoxInt(1) for i in range(10)])
+        res = self.execute_operation(rop.CALL,
                                      [funcbox] + args,
                                      'int', descr=calldescr)
         for i,j in enumerate(callargs[0]):

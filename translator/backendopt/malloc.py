@@ -10,9 +10,9 @@ class LifeTime:
 
     def __init__(self, (block, var)):
         assert isinstance(var, Variable)
-        self.variables = {(block, var)}
-        self.creationpoints = set()   # set of ("type of creation point", ...)
-        self.usepoints = set()        # set of ("type of use point",      ...)
+        self.variables = {(block, var) : True}
+        self.creationpoints = {}   # set of ("type of creation point", ...)
+        self.usepoints = {}        # set of ("type of use point",      ...)
 
     def absorb(self, other):
         self.variables.update(other.variables)
@@ -126,11 +126,11 @@ class BaseMallocRemover(object):
 
         def set_creation_point(block, var, *cp):
             _, _, info = lifetimes.find((block, var))
-            info.creationpoints.add(cp)
+            info.creationpoints[cp] = True
 
         def set_use_point(block, var, *up):
             _, _, info = lifetimes.find((block, var))
-            info.usepoints.add(up)
+            info.usepoints[up] = True
 
         def union(block1, var1, block2, var2):
             if isinstance(var1, Variable):
@@ -170,7 +170,7 @@ class BaseMallocRemover(object):
             if isinstance(node.last_exc_value, Variable):
                 set_creation_point(node.prevblock, node.last_exc_value,
                                    "last_exc_value")
-            d = set()
+            d = {}
             for i, arg in enumerate(node.args):
                 union(node.prevblock, arg,
                       node.target, node.target.inputargs[i])
@@ -181,7 +181,7 @@ class BaseMallocRemover(object):
                         # will disable malloc optimization (aliasing problems)
                         set_use_point(node.prevblock, arg, "dup", node, i)
                     else:
-                        d.add(arg)
+                        d[arg] = True
 
         return lifetimes.infos()
 
@@ -189,7 +189,7 @@ class BaseMallocRemover(object):
         """Try to inline the mallocs creation and manipulation of the Variables
         in the given LifeTime."""
         # the values must be only ever created by a "malloc"
-        lltypes = set()
+        lltypes = {}
         for cp in info.creationpoints:
             if cp[0] != "op":
                 return False
@@ -199,19 +199,18 @@ class BaseMallocRemover(object):
             if not self.inline_type(op.args[0].value):
                 return False
 
-            lltypes.add(op.result.concretetype)
+            lltypes[op.result.concretetype] = True
 
         # there must be a single largest malloced GcStruct;
         # all variables can point to it or to initial substructures
         if len(lltypes) != 1:
             return False
-        concretetype, = lltypes
-        STRUCT = self.get_STRUCT(concretetype)
+        STRUCT = self.get_STRUCT(lltypes.keys()[0])
 
         # must be only ever accessed via getfield/setfield/getsubstruct/
         # direct_fieldptr, or touched by ptr_iszero/ptr_nonzero.
         # Note that same_as and cast_pointer are not recorded in usepoints.
-        self.accessed_substructs = set()
+        self.accessed_substructs = {}
 
         for up in info.usepoints:
             if up[0] != "op":
@@ -260,8 +259,8 @@ class BaseMallocRemover(object):
 
         variables_by_block = {}
         for block, var in info.variables:
-            vars = variables_by_block.setdefault(block, set())
-            vars.add(var)
+            vars = variables_by_block.setdefault(block, {})
+            vars[var] = True
 
         count = [0]
 
@@ -270,10 +269,10 @@ class BaseMallocRemover(object):
             # look for variables arriving from outside the block
             newvarsmap = None
             newinputargs = []
-            inputvars = set()
+            inputvars = {}
             for var in block.inputargs:
                 if var in vars:
-                    inputvars.add(var)
+                    inputvars[var] = None
                     if newvarsmap is None:
                         newvarsmap = {}
                         for key in self.flatnames:
@@ -293,7 +292,7 @@ class BaseMallocRemover(object):
                 if self.check_malloc(op) and op.result in vars:
                     vars_created_here.append(op.result)
             for var in vars_created_here:
-                self.flowin(block, count, {var}, newvarsmap=None)
+                self.flowin(block, count, {var: True}, newvarsmap=None)
 
         return count[0]
 
@@ -371,7 +370,7 @@ class LLTypeMallocRemover(BaseMallocRemover):
         name = op.args[1].value
         if not isinstance(name, str):      # access by index
             name = 'item%d' % (name,)
-        self.accessed_substructs.add((S, name))
+        self.accessed_substructs[S, name] = True
 
     def inline_type(self, TYPE):
         return True
@@ -494,7 +493,7 @@ class LLTypeMallocRemover(BaseMallocRemover):
             else:
                 newvarsmap[key] = op.args[2]
         elif op.opname in ("same_as", "cast_pointer"):
-            vars.add(op.result)
+            vars[op.result] = True
             # Consider the two pointers (input and result) as
             # equivalent.  We can, and indeed must, use the same
             # flattened list of variables for both, as a "setfield"
@@ -509,7 +508,7 @@ class LLTypeMallocRemover(BaseMallocRemover):
             if equiv:
                 # exactly like a cast_pointer
                 assert op.result not in vars
-                vars.add(op.result)
+                vars[op.result] = True
             else:
                 # do it with a getsubstruct on the independently
                 # malloc'ed GcStruct

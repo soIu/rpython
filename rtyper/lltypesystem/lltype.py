@@ -8,7 +8,7 @@ from rpython.rlib.objectmodel import Symbolic
 from rpython.rlib.rarithmetic import (
     base_int, intmask, is_emulated_long, is_valid_int, longlonglongmask,
     longlongmask, maxint, normalizedinttype, r_int, r_longfloat, r_longlong,
-    r_longlonglong, r_singlefloat, r_uint, r_ulonglong, r_ulonglonglong)
+    r_longlonglong, r_singlefloat, r_uint, r_ulonglong)
 from rpython.rtyper.extregistry import ExtRegistryEntry
 from rpython.tool import leakfinder
 from rpython.tool.identity_dict import identity_dict
@@ -676,7 +676,6 @@ _numbertypes = {int: Number("Signed", int, intmask)}
 _numbertypes[r_int] = _numbertypes[int]
 _numbertypes[r_longlonglong] = Number("SignedLongLongLong", r_longlonglong,
                                       longlonglongmask)
-
 if r_longlong is not r_int:
     _numbertypes[r_longlong] = Number("SignedLongLong", r_longlong,
                                       longlongmask)
@@ -701,7 +700,6 @@ Unsigned = build_number("Unsigned", r_uint)
 SignedLongLong = build_number("SignedLongLong", r_longlong)
 SignedLongLongLong = build_number("SignedLongLongLong", r_longlonglong)
 UnsignedLongLong = build_number("UnsignedLongLong", r_ulonglong)
-UnsignedLongLongLong = build_number("UnsignedLongLongLong", r_ulonglonglong)
 
 Float       = Primitive("Float",       0.0)                  # C type 'double'
 SingleFloat = Primitive("SingleFloat", r_singlefloat(0.0))   # 'float'
@@ -814,10 +812,8 @@ def typeOf(val):
         if tp is long:
             if -maxint-1 <= val <= maxint:
                 return Signed
-            elif longlongmask(val) == val:
-                return SignedLongLong
             else:
-                raise OverflowError("integer %r is out of bounds" % (val,))
+                return SignedLongLong
         if tp is bool:
             return Bool
         if issubclass(tp, base_int):
@@ -1382,11 +1378,20 @@ class _abstract_ptr(object):
             return callb(*args)
         raise TypeError("%r instance is not a function" % (self._T,))
 
-    def _identityhash(self):
+    def _identityhash(self, cache=True):
         p = normalizeptr(self)
-        assert self._T._gckind == 'gc'
-        assert self      # not for NULL
-        return hash(p._obj)
+        try:
+            return p._obj._hash_cache_
+        except AttributeError:
+            assert self._T._gckind == 'gc'
+            assert self      # not for NULL
+            result = hash(p._obj)
+            if cache:
+                try:
+                    p._obj._hash_cache_ = result
+                except AttributeError:
+                    pass
+            return result
 
 class _ptr(_abstract_ptr):
     __slots__ = ('_TYPE',
@@ -1464,10 +1469,7 @@ class _ptr(_abstract_ptr):
         result = intmask(obj._getid())
         # assume that id() returns an addressish value which is
         # not zero and aligned to at least a multiple of 4
-        # (at least for GC pointers; we can't really assume anything
-        # for raw addresses)
-        if self._T._gckind == 'gc':
-            assert result != 0 and (result & 3) == 0
+        assert result != 0 and (result & 3) == 0
         return result
 
     def _cast_to_adr(self):
@@ -1752,14 +1754,11 @@ def _get_empty_instance_of_struct_variety(flds):
 class _struct(_parentable):
     _kind = "structure"
 
-    __slots__ = ('_compilation_info',)
+    __slots__ = ('_hash_cache_', '_compilation_info')
 
     def __new__(self, TYPE, n=None, initialization=None, parent=None,
                 parentindex=None):
-        if isinstance(TYPE, FixedSizeArray):
-            my_variety = _fixedsizearray
-        else:
-            my_variety = _struct_variety(TYPE._names)
+        my_variety = _struct_variety(TYPE._names)
         return object.__new__(my_variety)
 
     def __init__(self, TYPE, n=None, initialization=None, parent=None,
@@ -1769,6 +1768,7 @@ class _struct(_parentable):
             raise TypeError("%r is not variable-sized" % (TYPE,))
         if n is None and TYPE._arrayfld is not None:
             raise TypeError("%r is variable-sized" % (TYPE,))
+        first, FIRSTTYPE = TYPE._first_struct()
         for fld, typ in TYPE._flds.items():
             if fld == TYPE._arrayfld:
                 value = _array(typ, n, initialization=initialization,
@@ -1811,48 +1811,23 @@ class _struct(_parentable):
             raise UninitializedMemoryAccess("%r.%s"%(self, field_name))
         return r
 
-
-class _fixedsizearray(_struct):
-    def __init__(self, TYPE, n=None, initialization=None, parent=None,
-                 parentindex=None):
-        _parentable.__init__(self, TYPE)
-        if n is not None:
-            raise TypeError("%r is not variable-sized" % (TYPE,))
-        typ = TYPE.OF
-        storage = []
-        for i, fld in enumerate(TYPE._names):
-            value = typ._allocate(initialization=initialization,
-                                  parent=self, parentindex=fld)
-            storage.append(value)
-        self._items = storage
-        if parent is not None:
-            self._setparentstructure(parent, parentindex)
+    # for FixedSizeArray kind of structs:
 
     def getlength(self):
+        assert isinstance(self._TYPE, FixedSizeArray)
         return self._TYPE.length
 
     def getbounds(self):
         return 0, self.getlength()
 
     def getitem(self, index, uninitialized_ok=False):
-        assert 0 <= index < self.getlength()
-        return self._items[index]
+        assert isinstance(self._TYPE, FixedSizeArray)
+        return self._getattr('item%d' % index, uninitialized_ok)
 
     def setitem(self, index, value):
-        assert 0 <= index < self.getlength()
-        self._items[index] = value
+        assert isinstance(self._TYPE, FixedSizeArray)
+        setattr(self, 'item%d' % index, value)
 
-    def __getattr__(self, name):
-        # obscure
-        if name.startswith("item"):
-            return self.getitem(int(name[len('item'):]))
-        return _struct.__getattr__(self, name)
-
-    def __setattr__(self, name, value):
-        if name.startswith("item"):
-            self.setitem(int(name[len('item'):]), value)
-            return
-        _struct.__setattr__(self, name, value)
 
 class _array(_parentable):
     _kind = "array"
@@ -1919,29 +1894,14 @@ class _array(_parentable):
         return 0, stop
 
     def getitem(self, index, uninitialized_ok=False):
-        try:
-            v = self.items[index]
-        except IndexError:
-            if (index == len(self.items) and uninitialized_ok == 2 and
-                self._TYPE._hints.get('extra_item_after_alloc')):
-                # special case: reading the extra final char returns
-                # an uninitialized, if 'uninitialized_ok==2'
-                return _uninitialized(self._TYPE.OF)
-            raise
+        v = self.items[index]
         if isinstance(v, _uninitialized) and not uninitialized_ok:
             raise UninitializedMemoryAccess("%r[%s]"%(self, index))
         return v
 
     def setitem(self, index, value):
         assert typeOf(value) == self._TYPE.OF
-        try:
-            self.items[index] = value
-        except IndexError:
-            if (index == len(self.items) and value == '\x00' and
-                self._TYPE._hints.get('extra_item_after_alloc')):
-                # special case: writing NULL to the extra final char
-                return
-            raise
+        self.items[index] = value
 
 assert not '__dict__' in dir(_array)
 assert not '__dict__' in dir(_struct)
@@ -2184,8 +2144,7 @@ class _opaque(_parentable):
 
 
 def malloc(T, n=None, flavor='gc', immortal=False, zero=False,
-           track_allocation=True, add_memory_pressure=False,
-           nonmovable=False):
+           track_allocation=True, add_memory_pressure=False):
     assert flavor in ('gc', 'raw')
     if zero or immortal:
         initialization = 'example'
@@ -2210,9 +2169,8 @@ def malloc(T, n=None, flavor='gc', immortal=False, zero=False,
     return _ptr(Ptr(T), o, solid)
 
 @analyzer_for(malloc)
-def ann_malloc(s_T, s_n=None, s_flavor=None, s_immortal=None, s_zero=None,
-               s_track_allocation=None, s_add_memory_pressure=None,
-               s_nonmovable=None):
+def ann_malloc(s_T, s_n=None, s_flavor=None, s_zero=None,
+               s_track_allocation=None, s_add_memory_pressure=None):
     assert (s_n is None or s_n.knowntype == int
             or issubclass(s_n.knowntype, base_int))
     assert s_T.is_constant()
@@ -2230,7 +2188,6 @@ def ann_malloc(s_T, s_n=None, s_flavor=None, s_immortal=None, s_zero=None,
         assert s_track_allocation is None or s_track_allocation.is_constant()
         assert (s_add_memory_pressure is None or
                 s_add_memory_pressure.is_constant())
-        assert s_nonmovable is None or s_nonmovable.is_constant()
         # not sure how to call malloc() for the example 'p' in the
         # presence of s_extraargs
         r = SomePtr(Ptr(s_T.const))
@@ -2308,35 +2265,6 @@ def functionptr(TYPE, name, **attrs):
     o = _func(TYPE, _name=name, **attrs)
     return _ptr(Ptr(TYPE), o)
 
-def _getconcretetype(v):
-    return v.concretetype
-
-def getfunctionptr(graph, getconcretetype=_getconcretetype):
-    """Return callable given a Python function."""
-    llinputs = [getconcretetype(v) for v in graph.getargs()]
-    lloutput = getconcretetype(graph.getreturnvar())
-
-    FT = FuncType(llinputs, lloutput)
-    name = graph.name
-    if hasattr(graph, 'func') and callable(graph.func):
-        # the Python function object can have _llfnobjattrs_, specifying
-        # attributes that are forced upon the functionptr().  The idea
-        # for not passing these extra attributes as arguments to
-        # getcallable() itself is that multiple calls to getcallable()
-        # for the same graph should return equal functionptr() objects.
-        if hasattr(graph.func, '_llfnobjattrs_'):
-            fnobjattrs = graph.func._llfnobjattrs_.copy()
-            # can specify a '_name', but use graph.name by default
-            name = fnobjattrs.pop('_name', name)
-        else:
-            fnobjattrs = {}
-        # _callable is normally graph.func, but can be overridden:
-        # see fakeimpl in extfunc.py
-        _callable = fnobjattrs.pop('_callable', graph.func)
-        return functionptr(FT, name, graph=graph, _callable=_callable,
-                           **fnobjattrs)
-    else:
-        return functionptr(FT, name, graph=graph)
 
 def nullptr(T):
     return Ptr(T)._defl()
@@ -2435,6 +2363,24 @@ def ann_identityhash(s_obj):
     return SomeInteger()
 
 
+def identityhash_nocache(p):
+    """Version of identityhash() to use from backends that don't care about
+    caching."""
+    assert p
+    return p._identityhash(cache=False)
+
+def init_identity_hash(p, value):
+    """For a prebuilt object p, initialize its hash value to 'value'."""
+    assert isinstance(typeOf(p), Ptr)
+    p = normalizeptr(p)
+    if not p:
+        raise ValueError("cannot change hash(NULL)!")
+    if hasattr(p._obj, '_hash_cache_'):
+        raise ValueError("the hash of %r was already computed" % (p,))
+    if typeOf(p).TO._is_varsize():
+        raise ValueError("init_identity_hash(): not for varsized types")
+    p._obj._hash_cache_ = intmask(value)
+
 def isCompatibleType(TYPE1, TYPE2):
     return TYPE1._is_compatible(TYPE2)
 
@@ -2498,5 +2444,3 @@ def dissect_ll_instance(v, t=None, memo=None):
         for item in v.items:
             for i in dissect_ll_instance(item, t.OF, memo):
                 yield i
-
-

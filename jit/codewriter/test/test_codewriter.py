@@ -23,9 +23,10 @@ class FakeFieldDescr(AbstractDescr):
         self.fieldname = fieldname
 
 class FakeSizeDescr(AbstractDescr):
-    def __init__(self, STRUCT, vtable=None):
+    def __init__(self, STRUCT):
         self.STRUCT = STRUCT
-        self.vtable = vtable
+    def as_vtable_size_descr(self):
+        return self
 
 class FakeArrayDescr(AbstractDescr):
     def __init__(self, ARRAY):
@@ -76,11 +77,11 @@ def test_loop():
     assert jitcode.num_regs_i() == 2
     assert jitcode.num_regs_r() == 0
     assert jitcode.num_regs_f() == 0
-    assert jitcode._live_vars(0) == '%i0 %i1'
+    assert jitcode._live_vars(5) == '%i0 %i1'
     #
     from rpython.jit.codewriter.jitcode import MissingLiveness
     for i in range(len(jitcode.code)+1):
-        if i != 0:
+        if i != 5:
             py.test.raises(MissingLiveness, jitcode._live_vars, i)
 
 def test_call():

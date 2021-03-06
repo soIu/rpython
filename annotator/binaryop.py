@@ -1,23 +1,22 @@
 """
 Binary operations between SomeValues.
 """
-from collections import defaultdict
 
 from rpython.tool.pairtype import pair, pairtype
 from rpython.annotator.model import (
     SomeObject, SomeInteger, SomeBool, s_Bool, SomeString, SomeChar, SomeList,
-    SomeDict, SomeUnicodeCodePoint, SomeUnicodeString, SomeException,
+    SomeDict, SomeUnicodeCodePoint, SomeUnicodeString,
     SomeTuple, SomeImpossibleValue, s_ImpossibleValue, SomeInstance,
     SomeBuiltinMethod, SomeIterator, SomePBC, SomeNone, SomeFloat, s_None,
     SomeByteArray, SomeWeakRef, SomeSingleFloat,
-    SomeLongFloat, SomeType, SomeTypeOf, SomeConstantType, unionof, UnionError,
-    union, read_can_only_throw, add_knowntypedata,
+    SomeLongFloat, SomeType, SomeConstantType, unionof, UnionError,
+    read_can_only_throw, add_knowntypedata,
     merge_knowntypedata,)
-from rpython.annotator.bookkeeper import immutablevalue, getbookkeeper
+from rpython.annotator.bookkeeper import immutablevalue
 from rpython.flowspace.model import Variable, Constant, const
 from rpython.flowspace.operation import op
 from rpython.rlib import rarithmetic
-from rpython.annotator.model import AnnotatorError, TLS
+from rpython.annotator.model import AnnotatorError
 
 BINARY_OPERATIONS = set([oper.opname for oper in op.__dict__.values()
                         if oper.dispatch == 2])
@@ -36,7 +35,7 @@ def is__default(annotator, obj1, obj2):
     elif s_obj1.is_constant():
         if s_obj1.const is None and not s_obj2.can_be_none():
             r.const = False
-    knowntypedata = defaultdict(dict)
+    knowntypedata = {}
     bk = annotator.bookkeeper
 
     def bind(src_obj, tgt_obj):
@@ -70,22 +69,6 @@ def _make_cmp_annotator_default(cmp_op):
 
 for cmp_op in [op.lt, op.le, op.eq, op.ne, op.gt, op.ge]:
     _make_cmp_annotator_default(cmp_op)
-
-@op.getitem.register(SomeObject, SomeObject)
-def getitem_default(ann, v_obj, v_index):
-    return s_ImpossibleValue
-
-def _getitem_can_only_throw(s_c1, s_o2):
-    impl = op.getitem.get_specialization(s_c1, s_o2)
-    return read_can_only_throw(impl, s_c1, s_o2)
-
-@op.getitem_idx.register(SomeObject, SomeObject)
-def getitem_idx(ann, v_obj, v_index):
-    s_obj = ann.annotation(v_obj)
-    s_index = ann.annotation(v_index)
-    impl = op.getitem.get_specialization(s_obj, s_index)
-    return impl(ann, v_obj, v_index)
-getitem_idx.can_only_throw = _getitem_can_only_throw
 
 class __extend__(pairtype(SomeObject, SomeObject)):
 
@@ -127,10 +110,10 @@ class __extend__(pairtype(SomeObject, SomeObject)):
     def coerce((obj1, obj2)):
         return pair(obj1, obj2).union()   # reasonable enough
 
-    def add((obj1, obj2)):
+    def getitem((obj1, obj2)):
         return s_ImpossibleValue
-    sub = mul = truediv = floordiv = div = mod = add
-    lshift = rshift = and_ = or_ = xor = delitem = add
+    add = sub = mul = truediv = floordiv = div = mod = getitem
+    lshift = rshift = and_ = or_ = xor = delitem = getitem
 
     def setitem((obj1, obj2), _):
         return s_ImpossibleValue
@@ -143,6 +126,17 @@ class __extend__(pairtype(SomeObject, SomeObject)):
         else:
             return obj
 
+    # checked getitems
+
+    def _getitem_can_only_throw(s_c1, s_o2):
+        impl = pair(s_c1, s_o2).getitem
+        return read_can_only_throw(impl, s_c1, s_o2)
+
+    def getitem_idx((s_c1, s_o2)):
+        impl = pair(s_c1, s_o2).getitem
+        return impl()
+    getitem_idx.can_only_throw = _getitem_can_only_throw
+
 
 
 class __extend__(pairtype(SomeType, SomeType),
@@ -151,18 +145,24 @@ class __extend__(pairtype(SomeType, SomeType),
 
     def union((obj1, obj2)):
         result = SomeType()
+        is_type_of1 = getattr(obj1, 'is_type_of', None)
+        is_type_of2 = getattr(obj2, 'is_type_of', None)
         if obj1.is_immutable_constant() and obj2.is_immutable_constant() and obj1.const == obj2.const:
             result.const = obj1.const
+            is_type_of = {}
+            if is_type_of1:
+                for v in is_type_of1:
+                    is_type_of[v] = True
+            if is_type_of2:
+                for v in is_type_of2:
+                    is_type_of[v] = True
+            if is_type_of:
+                result.is_type_of = is_type_of.keys()
+        else:
+            if is_type_of1 and is_type_of1 == is_type_of2:
+                result.is_type_of = is_type_of1
         return result
 
-class __extend__(pairtype(SomeTypeOf, SomeTypeOf)):
-    def union((s_obj1, s_obj2)):
-        vars = list(set(s_obj1.is_type_of) | set(s_obj2.is_type_of))
-        result = SomeTypeOf(vars)
-        if (s_obj1.is_immutable_constant() and s_obj2.is_immutable_constant()
-                and s_obj1.const == s_obj2.const):
-            result.const = obj1.const
-        return result
 
 # cloning a function with identical code, for the can_only_throw attribute
 def _clone(f, can_only_throw = None):
@@ -263,7 +263,7 @@ def _make_cmp_annotator_int(cmp_op):
         if not (rarithmetic.signedtype(s_int1.knowntype) and
                 rarithmetic.signedtype(s_int2.knowntype)):
             return r
-        knowntypedata = defaultdict(dict)
+        knowntypedata = {}
         def tointtype(s_int0):
             if s_int0.knowntype is bool:
                 return int
@@ -381,13 +381,14 @@ class __extend__(pairtype(SomeChar, SomeChar)):
 class __extend__(pairtype(SomeChar, SomeUnicodeCodePoint),
                  pairtype(SomeUnicodeCodePoint, SomeChar)):
     def union((uchr1, uchr2)):
-        no_nul = uchr1.no_nul and uchr2.no_nul
-        return SomeUnicodeCodePoint(no_nul=no_nul)
+        return SomeUnicodeCodePoint()
 
 class __extend__(pairtype(SomeUnicodeCodePoint, SomeUnicodeCodePoint)):
     def union((uchr1, uchr2)):
-        no_nul = uchr1.no_nul and uchr2.no_nul
-        return SomeUnicodeCodePoint(no_nul=no_nul)
+        return SomeUnicodeCodePoint()
+
+    def add((chr1, chr2)):
+        return SomeUnicodeString()
 
 class __extend__(pairtype(SomeString, SomeUnicodeString),
                  pairtype(SomeUnicodeString, SomeString)):
@@ -399,9 +400,6 @@ class __extend__(pairtype(SomeString, SomeUnicodeString),
 class __extend__(pairtype(SomeString, SomeTuple),
                  pairtype(SomeUnicodeString, SomeTuple)):
     def mod((s_string, s_tuple)):
-        if not s_string.is_constant():
-            raise AnnotatorError("string formatting requires a constant "
-                                 "string/unicode on the left of '%'")
         is_string = isinstance(s_string, SomeString)
         is_unicode = isinstance(s_string, SomeUnicodeString)
         assert is_string or is_unicode
@@ -427,18 +425,12 @@ class __extend__(pairtype(SomeString, SomeTuple),
 class __extend__(pairtype(SomeString, SomeObject),
                  pairtype(SomeUnicodeString, SomeObject)):
 
-    def mod((s_string, s_arg)):
-        assert not isinstance(s_arg, SomeTuple)
-        return pair(s_string, SomeTuple([s_arg])).mod()
+    def mod((s_string, args)):
+        return s_string.__class__()
 
 class __extend__(pairtype(SomeFloat, SomeFloat)):
 
     def union((flt1, flt2)):
-        if not TLS.allow_int_to_float:
-            # in this mode, if one of the two is actually the
-            # subclass SomeInteger, complain
-            if isinstance(flt1, SomeInteger) or isinstance(flt2, SomeInteger):
-                raise UnionError(flt1, flt2)
         return SomeFloat()
 
     add = sub = mul = union
@@ -471,11 +463,10 @@ class __extend__(pairtype(SomeList, SomeList)):
         return SomeList(lst1.listdef.union(lst2.listdef))
 
     def add((lst1, lst2)):
-        bk = getbookkeeper()
-        return lst1.listdef.offspring(bk, lst2.listdef)
+        return lst1.listdef.offspring(lst2.listdef)
 
     def eq((lst1, lst2)):
-        lst1.listdef.agree(getbookkeeper(), lst2.listdef)
+        lst1.listdef.agree(lst2.listdef)
         return s_Bool
     ne = eq
 
@@ -512,13 +503,13 @@ class __extend__(pairtype(SomeTuple, SomeTuple)):
     ne = eq
 
     def lt((tup1, tup2)):
-        raise AnnotatorError("unsupported: (...) < (...)")
+        raise Exception("unsupported: (...) < (...)")
     def le((tup1, tup2)):
-        raise AnnotatorError("unsupported: (...) <= (...)")
+        raise Exception("unsupported: (...) <= (...)")
     def gt((tup1, tup2)):
-        raise AnnotatorError("unsupported: (...) > (...)")
+        raise Exception("unsupported: (...) > (...)")
     def ge((tup1, tup2)):
-        raise AnnotatorError("unsupported: (...) >= (...)")
+        raise Exception("unsupported: (...) >= (...)")
 
 
 class __extend__(pairtype(SomeDict, SomeDict)):
@@ -527,39 +518,27 @@ class __extend__(pairtype(SomeDict, SomeDict)):
         assert dic1.__class__ == dic2.__class__
         return dic1.__class__(dic1.dictdef.union(dic2.dictdef))
 
-    def ne((dic1, dic2)):
-        raise AnnotatorError("dict != dict not implemented")
-
-def _dict_can_only_throw_keyerror(s_dct, *ignore):
-    if s_dct.dictdef.dictkey.custom_eq_hash:
-        return None    # r_dict: can throw anything
-    return [KeyError]
-
-def _dict_can_only_throw_nothing(s_dct, *ignore):
-    if s_dct.dictdef.dictkey.custom_eq_hash:
-        return None    # r_dict: can throw anything
-    return []          # else: no possible exception
-
-@op.getitem.register(SomeDict, SomeObject)
-def getitem_SomeDict(annotator, v_dict, v_key):
-    s_dict = annotator.annotation(v_dict)
-    s_key = annotator.annotation(v_key)
-    s_dict.dictdef.generalize_key(s_key)
-    position = annotator.bookkeeper.position_key
-    return s_dict.dictdef.read_value(position)
-getitem_SomeDict.can_only_throw = _dict_can_only_throw_keyerror
-
 
 class __extend__(pairtype(SomeDict, SomeObject)):
+
+    def _can_only_throw(dic1, *ignore):
+        if dic1.dictdef.dictkey.custom_eq_hash:
+            return None
+        return [KeyError]
+
+    def getitem((dic1, obj2)):
+        dic1.dictdef.generalize_key(obj2)
+        return dic1.dictdef.read_value()
+    getitem.can_only_throw = _can_only_throw
 
     def setitem((dic1, obj2), s_value):
         dic1.dictdef.generalize_key(obj2)
         dic1.dictdef.generalize_value(s_value)
-    setitem.can_only_throw = _dict_can_only_throw_nothing
+    setitem.can_only_throw = _can_only_throw
 
     def delitem((dic1, obj2)):
         dic1.dictdef.generalize_key(obj2)
-    delitem.can_only_throw = _dict_can_only_throw_keyerror
+    delitem.can_only_throw = _can_only_throw
 
 
 class __extend__(pairtype(SomeTuple, SomeInteger)):
@@ -578,17 +557,14 @@ class __extend__(pairtype(SomeTuple, SomeInteger)):
 class __extend__(pairtype(SomeList, SomeInteger)):
 
     def mul((lst1, int2)):
-        bk = getbookkeeper()
-        return lst1.listdef.offspring(bk)
+        return lst1.listdef.offspring()
 
     def getitem((lst1, int2)):
-        position = getbookkeeper().position_key
-        return lst1.listdef.read_item(position)
+        return lst1.listdef.read_item()
     getitem.can_only_throw = []
 
     def getitem_idx((lst1, int2)):
-        position = getbookkeeper().position_key
-        return lst1.listdef.read_item(position)
+        return lst1.listdef.read_item()
     getitem_idx.can_only_throw = [IndexError]
 
     def setitem((lst1, int2), s_value):
@@ -615,33 +591,32 @@ class __extend__(pairtype(SomeString, SomeInteger)):
 
 class __extend__(pairtype(SomeUnicodeString, SomeInteger)):
     def getitem((str1, int2)):
-        return SomeUnicodeCodePoint(no_nul=str1.no_nul)
+        return SomeUnicodeCodePoint()
     getitem.can_only_throw = []
 
     def getitem_idx((str1, int2)):
-        return SomeUnicodeCodePoint(no_nul=str1.no_nul)
+        return SomeUnicodeCodePoint()
     getitem_idx.can_only_throw = [IndexError]
 
     def mul((str1, int2)): # xxx do we want to support this
-        return SomeUnicodeString(no_nul=str1.no_nul)
+        return SomeUnicodeString()
 
 class __extend__(pairtype(SomeInteger, SomeString),
                  pairtype(SomeInteger, SomeUnicodeString)):
 
     def mul((int1, str2)): # xxx do we want to support this
-        return str2.basestringclass(no_nul=str2.no_nul)
+        return str2.basestringclass()
 
 class __extend__(pairtype(SomeUnicodeCodePoint, SomeUnicodeString),
                  pairtype(SomeUnicodeString, SomeUnicodeCodePoint),
                  pairtype(SomeUnicodeString, SomeUnicodeString)):
     def union((str1, str2)):
-        can_be_None = str1.can_be_None or str2.can_be_None
-        no_nul = str1.no_nul and str2.no_nul
-        return SomeUnicodeString(can_be_None=can_be_None, no_nul=no_nul)
+        return SomeUnicodeString(can_be_None=str1.can_be_none() or
+                                 str2.can_be_none())
 
     def add((str1, str2)):
         # propagate const-ness to help getattr(obj, 'prefix' + const_name)
-        result = SomeUnicodeString(no_nul=str1.no_nul and str2.no_nul)
+        result = SomeUnicodeString()
         if str1.is_immutable_constant() and str2.is_immutable_constant():
             result.const = str1.const + str2.const
         return result
@@ -649,8 +624,7 @@ class __extend__(pairtype(SomeUnicodeCodePoint, SomeUnicodeString),
 class __extend__(pairtype(SomeInteger, SomeList)):
 
     def mul((int1, lst2)):
-        bk = getbookkeeper()
-        return lst2.listdef.offspring(bk)
+        return lst2.listdef.offspring()
 
 
 class __extend__(pairtype(SomeInstance, SomeInstance)):
@@ -699,22 +673,6 @@ class __extend__(pairtype(SomeInstance, SomeInstance)):
             thistype = pairtype(SomeInstance, SomeInstance)
             return super(thistype, pair(ins1, ins2)).improve()
 
-class __extend__(
-        pairtype(SomeException, SomeInstance),
-        pairtype(SomeException, SomeNone)):
-    def union((s_exc, s_inst)):
-        return union(s_exc.as_SomeInstance(), s_inst)
-
-class __extend__(
-        pairtype(SomeInstance, SomeException),
-        pairtype(SomeNone, SomeException)):
-    def union((s_inst, s_exc)):
-        return union(s_exc.as_SomeInstance(), s_inst)
-
-class __extend__(pairtype(SomeException, SomeException)):
-    def union((s_exc1, s_exc2)):
-        return SomeException(s_exc1.classdefs | s_exc2.classdefs)
-
 
 @op.getitem.register_transform(SomeInstance, SomeObject)
 def getitem_SomeInstance(annotator, v_ins, v_idx):
@@ -727,10 +685,6 @@ def setitem_SomeInstance(annotator, v_ins, v_idx, v_value):
     return [get_setitem,
             op.simple_call(get_setitem.result, v_idx, v_value)]
 
-@op.contains.register_transform(SomeInstance)
-def contains_SomeInstance(annotator, v_ins, v_idx):
-    get_contains = op.getattr(v_ins, const('__contains__'))
-    return [get_contains, op.simple_call(get_contains.result, v_idx)]
 
 class __extend__(pairtype(SomeIterator, SomeIterator)):
 
@@ -808,7 +762,6 @@ class __extend__(pairtype(SomePBC, SomeObject)):
 class __extend__(pairtype(SomeNone, SomeObject)):
     def getitem((none, o)):
         return s_ImpossibleValue
-    getitem.can_only_throw = []
 
     def setitem((none, o), s_value):
         return None

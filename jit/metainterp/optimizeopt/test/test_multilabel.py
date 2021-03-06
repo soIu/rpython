@@ -1,6 +1,6 @@
 from __future__ import with_statement
 from rpython.jit.metainterp.optimizeopt.test.test_util import (
-    LLtypeMixin, BaseTest, Storage,
+    LLtypeMixin, BaseTest, Storage, _sortboxes,
     FakeMetaInterpStaticData)
 from rpython.jit.metainterp.history import TreeLoop, JitCellToken, TargetToken
 from rpython.jit.metainterp.resoperation import rop, opname, ResOperation

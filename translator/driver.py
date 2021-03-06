@@ -14,9 +14,9 @@ from rpython.rlib.entrypoint import secondary_entrypoints,\
      annotated_jit_entrypoints
 
 import py
-from rpython.tool.ansi_print import AnsiLogger
-
-log = AnsiLogger("translation")
+from rpython.tool.ansi_print import ansi_log
+log = py.log.Producer("translation")
+py.log.setconsumer("translation", ansi_log)
 
 
 def taskdef(deps, title, new_state=None, expected_states=[],
@@ -67,16 +67,14 @@ class TranslationDriver(SimpleTaskEngine):
                  disable=[],
                  exe_name=None, extmod_name=None,
                  config=None, overrides=None):
-        from rpython.config import translationoption
         self.timer = Timer()
         SimpleTaskEngine.__init__(self)
 
         self.log = log
 
         if config is None:
-            config = translationoption.get_combined_translation_config(translating=True)
-        # XXX patch global variable with translation config
-        translationoption._GLOBAL_TRANSLATIONCONFIG = config
+            from rpython.config.translationoption import get_combined_translation_config
+            config = get_combined_translation_config(translating=True)
         self.config = config
         if overrides is not None:
             self.config.override(overrides)
@@ -203,8 +201,9 @@ class TranslationDriver(SimpleTaskEngine):
                 try:
                     points = secondary_entrypoints[key]
                 except KeyError:
-                    raise KeyError("Entrypoint %r not found (not in %r)" %
-                                   (key, secondary_entrypoints.keys()))
+                    raise KeyError(
+                        "Entrypoints not found. I only know the keys %r." %
+                        (", ".join(secondary_entrypoints.keys()), ))
                 self.secondary_entrypoints.extend(points)
 
         self.translator.driver_instrument_result = self.instrument_result
@@ -381,7 +380,7 @@ class TranslationDriver(SimpleTaskEngine):
         """ Run all backend optimizations - lltype version
         """
         from rpython.translator.backendopt.all import backend_optimizations
-        backend_optimizations(self.translator, replace_we_are_jitted=True)
+        backend_optimizations(self.translator)
 
 
     STACKCHECKINSERTION = 'stackcheckinsertion_lltype'
@@ -398,8 +397,8 @@ class TranslationDriver(SimpleTaskEngine):
             from rpython.translator.platform import CompilationError
             try:
                 configure_boehm(self.translator.platform)
-            except CompilationError as e:
-                i = 'Boehm GC not installed.  Try e.g. "translate.py --gc=minimark"'
+            except CompilationError, e:
+                i = 'Boehm GC not installed.  Try e.g. "translate.py --gc=hybrid"'
                 raise Exception(str(e) + '\n' + i)
 
     @taskdef([STACKCHECKINSERTION, '?'+BACKENDOPT, RTYPE, '?annotate'],
@@ -413,13 +412,11 @@ class TranslationDriver(SimpleTaskEngine):
             translator.frozen = True
 
         standalone = self.standalone
-        get_gchooks = self.extra.get('get_gchooks', lambda: None)
-        gchooks = get_gchooks()
 
         if standalone:
             from rpython.translator.c.genc import CStandaloneBuilder
             cbuilder = CStandaloneBuilder(self.translator, self.entry_point,
-                                          config=self.config, gchooks=gchooks,
+                                          config=self.config,
                       secondary_entrypoints=
                       self.secondary_entrypoints + annotated_jit_entrypoints)
         else:
@@ -428,8 +425,7 @@ class TranslationDriver(SimpleTaskEngine):
             cbuilder = CLibraryBuilder(self.translator, self.entry_point,
                                        functions=functions,
                                        name='libtesting',
-                                       config=self.config,
-                                       gchooks=gchooks)
+                                       config=self.config)
         if not standalone:     # xxx more messy
             cbuilder.modulename = self.extmod_name
         database = cbuilder.build_database()
@@ -490,16 +486,13 @@ class TranslationDriver(SimpleTaskEngine):
                     exe = py.path.local(exename)
                     exename = exe.new(purebasename=exe.purebasename + 'w')
                     shutil_copy(str(exename), str(newexename))
-                    # for pypy, the import library is renamed and moved to
-                    # libs/python32.lib, according to the pragma in pyconfig.h
-                    libname = self.config.translation.libname
-                    oldlibname = soname.new(ext='lib')
-                    if not libname:
-                        libname = oldlibname.basename
-                        libname = str(newsoname.dirpath().join(libname))
-                    shutil.copyfile(str(oldlibname), libname)
-                    self.log.info("copied: %s to %s" % (oldlibname, libname,))
-                    # the pdb file goes in the same place as pypy(w).exe
+                    # the import library is named python27.lib, according
+                    # to the pragma in pyconfig.h
+                    libname = str(newsoname.dirpath().join('python27.lib'))
+                    shutil.copyfile(str(soname.new(ext='lib')), libname)
+                    self.log.info("copied: %s" % (libname,))
+                    # XXX TODO : replace the nonsense above with
+                    # ext_to_copy = ['lib', 'pdb']
                     ext_to_copy = ['pdb',]
                     for ext in ext_to_copy:
                         name = soname.new(ext=ext)
@@ -507,6 +500,7 @@ class TranslationDriver(SimpleTaskEngine):
                         shutil.copyfile(str(name), str(newname.new(ext=ext)))
                         self.log.info("copied: %s" % (newname,))
             self.c_entryp = newexename
+        self.log.info('usession directory: %s' % (udir,))
         self.log.info("created: %s" % (self.c_entryp,))
 
     @taskdef(['source_c'], "Compiling c source")
@@ -526,9 +520,20 @@ class TranslationDriver(SimpleTaskEngine):
         else:
             self.c_entryp = cbuilder.get_entry_point()
 
+    # For now, the "JS" backend is actually just the C backend with
+    # compiler set to `emcc`.  It's neater to expose this as a fully
+    # separate backend.
+
+    task_database_js = task_database_c
+
+    task_source_js = task_source_c
+
+    task_compile_js = task_compile_c
+
     @taskdef([STACKCHECKINSERTION, '?'+BACKENDOPT, RTYPE], "LLInterpreting")
     def task_llinterpret_lltype(self):
         from rpython.rtyper.llinterp import LLInterpreter
+        py.log.setconsumer("llinterp operation", None)
 
         translator = self.translator
         interp = LLInterpreter(translator.rtyper)
@@ -538,7 +543,7 @@ class TranslationDriver(SimpleTaskEngine):
                               self.extra.get('get_llinterp_args',
                                              lambda: [])())
 
-        log.llinterpret("result -> %s" % v)
+        log.llinterpret.event("result -> %s" % v)
 
     def proceed(self, goals):
         if not goals:
@@ -551,20 +556,18 @@ class TranslationDriver(SimpleTaskEngine):
             goals = [goals]
         goals.extend(self.extra_goals)
         goals = self.backend_select_goals(goals)
-        result = self._execute(goals, task_skip = self._maybe_skip())
-        self.log.info('usession directory: %s' % (udir,))
-        return result
+        return self._execute(goals, task_skip = self._maybe_skip())
 
-    @classmethod
-    def from_targetspec(cls, targetspec_dic, config=None, args=None,
+    @staticmethod
+    def from_targetspec(targetspec_dic, config=None, args=None,
                         empty_translator=None,
                         disable=[],
                         default_goal=None):
         if args is None:
             args = []
 
-        driver = cls(config=config, default_goal=default_goal,
-                     disable=disable)
+        driver = TranslationDriver(config=config, default_goal=default_goal,
+                                   disable=disable)
         target = targetspec_dic['target']
         spec = target(driver, args)
 

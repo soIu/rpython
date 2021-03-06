@@ -24,12 +24,21 @@ def get_graph(arg, translator):
     if not isinstance(f, lltype._ptr):
         return None
     try:
-        funcobj = f._obj
+        funcobj = f._getobj()
     except lltype.DelayedPointer:
+        return None
+    try:
+        callable = funcobj._callable
+    except (AttributeError, KeyError, AssertionError):
         return None
     try:
         return funcobj.graph
     except AttributeError:
+        return None
+    try:
+        callable = funcobj._callable
+        return translator._graphof(callable)
+    except (AttributeError, KeyError, AssertionError):
         return None
 
 
@@ -405,7 +414,7 @@ def transform_dead_op_vars(graph, translator=None):
 CanRemove = {}
 for _op in '''
         newtuple newlist newdict bool
-        is_ id type issubtype isinstance repr str len hash getattr getitem
+        is_ id type issubtype repr str len hash getattr getitem
         pos neg abs hex oct ord invert add sub mul
         truediv floordiv div mod divmod pow lshift rshift and_ or_
         xor int float long lt le eq ne gt ge cmp coerce contains
@@ -416,6 +425,7 @@ for _op in enum_ops_without_sideeffects():
     CanRemove[_op] = True
 del _op
 CanRemoveBuiltins = {
+    isinstance: True,
     hasattr: True,
     }
 
@@ -1005,16 +1015,6 @@ class ListComprehensionDetector(object):
 
         # - add a hint(vlist, iterable, {'maxlength'}) in the iterblock,
         #   where we can compute the known maximum length
-        # - new in June 2017: we do that only if 'exactlength' is True.
-        #   found some real use cases where the over-allocation scheme
-        #   was over-allocating far too much: the loop would only append
-        #   an item to the list after 'if some rare condition:'.  By
-        #   dropping this hint, we disable preallocation and cause the
-        #   append() to be done by checking the size, but still, after
-        #   the loop, we will turn the list into a fixed-size one.
-        #   ('maxlength_inexact' is never processed elsewhere; the hint
-        #   is still needed to prevent this function from being entered
-        #   in an infinite loop)
         link = iterblock.exits[0]
         vlist = self.contains_vlist(link.args)
         assert vlist
@@ -1024,8 +1024,7 @@ class ListComprehensionDetector(object):
                 break
         else:
             raise AssertionError("lost 'iter' operation")
-        chint = Constant({'maxlength' if exactlength else 'maxlength_inexact':
-                          True})
+        chint = Constant({'maxlength': True})
         hint = op.hint(vlist, hlop.args[0], chint)
         iterblock.operations.append(hint)
         link.args = list(link.args)

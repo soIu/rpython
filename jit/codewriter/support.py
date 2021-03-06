@@ -4,6 +4,7 @@ from rpython.annotator import model as annmodel
 from rpython.rtyper.llannotation import lltype_to_annotation
 from rpython.annotator.policy import AnnotatorPolicy
 from rpython.flowspace.model import Variable, Constant
+from rpython.jit.metainterp.typesystem import deref
 from rpython.rlib import rgc
 from rpython.rlib.jit import elidable, oopspec
 from rpython.rlib.rarithmetic import r_longlong, r_ulonglong, r_uint, intmask
@@ -97,9 +98,8 @@ def autodetect_jit_markers_redvars(graph):
             op.args.extend(reds_v)
             if jitdriver.numreds is None:
                 jitdriver.numreds = len(reds_v)
-            elif jitdriver.numreds != len(reds_v):
-                raise AssertionError("there are multiple jit_merge_points "
-                                     "with the same jitdriver")
+            else:
+                assert jitdriver.numreds == len(reds_v), 'inconsistent number of reds_v'
 
 def split_before_jit_merge_point(graph, portalblock, portalopindex):
     """Split the block just before the 'jit_merge_point',
@@ -141,14 +141,10 @@ def decode_hp_hint_args(op):
             assert len(lst) == len(args_v), (
                 "not supported so far: 'greens' variables contain Void")
         # a crash here means that you have to reorder the variable named in
-        # the JitDriver.
+        # the JitDriver.  Indeed, greens and reds must both be sorted: first
+        # all INTs, followed by all REFs, followed by all FLOATs.
         lst2 = sort_vars(lst)
-        assert lst == lst2, ("You have to reorder the variables named in "
-            "the JitDriver (both the 'greens' and 'reds' independently). "
-            "They must be sorted like this: first all the integer-like, "
-            "then all the pointer-like, and finally the floats.\n"
-            "Got: %r\n"
-            "Expected: %r" % (lst, lst2))
+        assert lst == lst2
         return lst
     #
     return (_sort(greens_v, True), _sort(reds_v, False))
@@ -209,6 +205,7 @@ def _ll_2_list_pop(l, index):
     return rlist.ll_pop(rlist.dum_checkidx, l, index)
 _ll_2_list_append = rlist.ll_append
 _ll_2_list_extend = rlist.ll_extend
+_ll_3_list_insert = rlist.ll_insert_nonneg
 _ll_2_list_delslice_startonly = rlist.ll_listdelslice_startonly
 _ll_3_list_delslice_startstop = rlist.ll_listdelslice_startstop
 _ll_2_list_inplace_mul = rlist.ll_inplace_mul
@@ -245,30 +242,50 @@ def _ll_1_jit_force_virtual(inst):
     return llop.jit_force_virtual(lltype.typeOf(inst), inst)
 
 
+def _ll_2_int_floordiv_ovf_zer(x, y):
+    if y == 0:
+        raise ZeroDivisionError
+    if x == -sys.maxint - 1 and y == -1:
+        raise OverflowError
+    return llop.int_floordiv(lltype.Signed, x, y)
+
+def _ll_2_int_floordiv_ovf(x, y):
+    if x == -sys.maxint - 1 and y == -1:
+        raise OverflowError
+    return llop.int_floordiv(lltype.Signed, x, y)
+
+def _ll_2_int_floordiv_zer(x, y):
+    if y == 0:
+        raise ZeroDivisionError
+    return llop.int_floordiv(lltype.Signed, x, y)
+
+def _ll_2_int_mod_ovf_zer(x, y):
+    if y == 0:
+        raise ZeroDivisionError
+    if x == -sys.maxint - 1 and y == -1:
+        raise OverflowError
+    return llop.int_mod(lltype.Signed, x, y)
+
+def _ll_2_int_mod_ovf(x, y):
+    if x == -sys.maxint - 1 and y == -1:
+        raise OverflowError
+    return llop.int_mod(lltype.Signed, x, y)
+
+def _ll_2_int_mod_zer(x, y):
+    if y == 0:
+        raise ZeroDivisionError
+    return llop.int_mod(lltype.Signed, x, y)
+
+def _ll_2_int_lshift_ovf(x, y):
+    result = x << y
+    if (result >> y) != x:
+        raise OverflowError
+    return result
+
 def _ll_1_int_abs(x):
     # this version doesn't branch
     mask = x >> (LONG_BIT - 1)
     return (x ^ mask) - mask
-
-
-def _ll_2_int_floordiv(x, y):
-    # this is used only if the RPython program uses llop.int_floordiv()
-    # explicitly.  For 'a // b', see _handle_int_special() in jtransform.py.
-    # This is the reverse of rpython.rtyper.rint.ll_int_py_div(), i.e.
-    # the same logic as rpython.rtyper.lltypesystem.opimpl.op_int_floordiv
-    # but written in a no-branch style.
-    r = x // y
-    p = r * y
-    # the JIT knows that if x and y are both positive, this is just 'r'
-    return r + (((x ^ y) >> (LONG_BIT - 1)) & (p != x))
-
-def _ll_2_int_mod(x, y):
-    # same comments as _ll_2_int_floordiv()
-    r = x % y
-    # the JIT knows that if x and y are both positive, this doesn't change 'r'
-    r -= y & (((x ^ y) & (r | -r)) >> (LONG_BIT - 1))
-    return r
-
 
 def _ll_1_cast_uint_to_float(x):
     # XXX on 32-bit platforms, this should be done using cast_longlong_to_float
@@ -284,9 +301,6 @@ def _ll_0_ll_read_timestamp():
     from rpython.rlib import rtimer
     return rtimer.read_timestamp()
 
-def _ll_0_ll_get_timestamp_unit():
-    from rpython.rlib import rtimer
-    return rtimer.get_timestamp_unit()
 
 # math support
 # ------------
@@ -438,12 +452,52 @@ def _ll_1_llong_abs(xll):
     else:
         return xll
 
+def _ll_2_llong_floordiv(xll, yll):
+    return llop.llong_floordiv(lltype.SignedLongLong, xll, yll)
+
+def _ll_2_llong_floordiv_zer(xll, yll):
+    if yll == 0:
+        raise ZeroDivisionError
+    return llop.llong_floordiv(lltype.SignedLongLong, xll, yll)
+
+def _ll_2_llong_mod(xll, yll):
+    return llop.llong_mod(lltype.SignedLongLong, xll, yll)
+
+def _ll_2_llong_mod_zer(xll, yll):
+    if yll == 0:
+        raise ZeroDivisionError
+    return llop.llong_mod(lltype.SignedLongLong, xll, yll)
+
+def _ll_2_ullong_floordiv(xll, yll):
+    return llop.ullong_floordiv(lltype.UnsignedLongLong, xll, yll)
+
+def _ll_2_ullong_floordiv_zer(xll, yll):
+    if yll == 0:
+        raise ZeroDivisionError
+    return llop.ullong_floordiv(lltype.UnsignedLongLong, xll, yll)
+
+def _ll_2_ullong_mod(xll, yll):
+    return llop.ullong_mod(lltype.UnsignedLongLong, xll, yll)
+
+def _ll_2_ullong_mod_zer(xll, yll):
+    if yll == 0:
+        raise ZeroDivisionError
+    return llop.ullong_mod(lltype.UnsignedLongLong, xll, yll)
+
+def _ll_2_uint_mod(xll, yll):
+    return llop.uint_mod(lltype.Unsigned, xll, yll)
+
 
 # in the following calls to builtins, the JIT is allowed to look inside:
 inline_calls_to = [
+    ('int_floordiv_ovf_zer', [lltype.Signed, lltype.Signed], lltype.Signed),
+    ('int_floordiv_ovf',     [lltype.Signed, lltype.Signed], lltype.Signed),
+    ('int_floordiv_zer',     [lltype.Signed, lltype.Signed], lltype.Signed),
+    ('int_mod_ovf_zer',      [lltype.Signed, lltype.Signed], lltype.Signed),
+    ('int_mod_ovf',          [lltype.Signed, lltype.Signed], lltype.Signed),
+    ('int_mod_zer',          [lltype.Signed, lltype.Signed], lltype.Signed),
+    ('int_lshift_ovf',       [lltype.Signed, lltype.Signed], lltype.Signed),
     ('int_abs',              [lltype.Signed],                lltype.Signed),
-    ('int_floordiv',         [lltype.Signed, lltype.Signed], lltype.Signed),
-    ('int_mod',              [lltype.Signed, lltype.Signed], lltype.Signed),
     ('ll_math.ll_math_sqrt', [lltype.Float],                 lltype.Float),
 ]
 
@@ -587,14 +641,6 @@ class LLtypeHelpers:
                 return lltype.malloc(ARRAY, n, flavor='raw', zero=zero,
                                      add_memory_pressure=add_memory_pressure,
                                      track_allocation=track_allocation)
-            name = '_ll_1_raw_malloc_varsize'
-            if zero:
-                name += '_zero'
-            if add_memory_pressure:
-                name += '_mpressure'
-            if not track_allocation:
-                name += '_notrack'
-            _ll_1_raw_malloc_varsize.func_name = name
             return _ll_1_raw_malloc_varsize
         return build_ll_1_raw_malloc_varsize
 
@@ -623,14 +669,6 @@ class LLtypeHelpers:
                 return lltype.malloc(STRUCT, flavor='raw', zero=zero,
                                      add_memory_pressure=add_memory_pressure,
                                      track_allocation=track_allocation)
-            name = '_ll_0_raw_malloc_fixedsize'
-            if zero:
-                name += '_zero'
-            if add_memory_pressure:
-                name += '_mpressure'
-            if not track_allocation:
-                name += '_notrack'
-            _ll_0_raw_malloc_fixedsize.func_name = name
             return _ll_0_raw_malloc_fixedsize
         return build_ll_0_raw_malloc_fixedsize
 
@@ -677,8 +715,6 @@ class LLtypeHelpers:
 
     def _ll_1_gc_add_memory_pressure(num):
         llop.gc_add_memory_pressure(lltype.Void, num)
-    def _ll_2_gc_add_memory_pressure(num, obj):
-        llop.gc_add_memory_pressure(lltype.Void, num, obj)
 
 
 def setup_extra_builtin(rtyper, oopspec_name, nb_args, extra=None):
@@ -785,7 +821,7 @@ def builtin_func_for_spec(rtyper, oopspec_name, ll_args, ll_res,
             bk = rtyper.annotator.bookkeeper
             ll_restype = ll_res
             if impl.need_result_type != 'exact':
-                ll_restype = ll_restype.TO
+                ll_restype = deref(ll_restype)
             desc = bk.getdesc(ll_restype)
         else:
             class TestingDesc(object):

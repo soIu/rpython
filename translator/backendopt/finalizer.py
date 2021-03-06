@@ -1,43 +1,30 @@
+
 from rpython.translator.backendopt import graphanalyze
 from rpython.rtyper.lltypesystem import lltype
-from rpython.tool.ansi_print import AnsiLogger
-
-log = AnsiLogger("finalizer")
-
 
 class FinalizerError(Exception):
-    """__del__() is used for lightweight RPython destructors,
-    but the FinalizerAnalyzer found that it is not lightweight.
-
-    The set of allowed operations is restrictive for a good reason
-    - it's better to be safe. Specifically disallowed operations:
-
-    * anything that escapes self
-    * anything that can allocate
+    """ __del__ marked as lightweight finalizer, but the analyzer did
+    not agree
     """
 
 class FinalizerAnalyzer(graphanalyze.BoolGraphAnalyzer):
     """ Analyzer that determines whether a finalizer is lightweight enough
     so it can be called without all the complicated logic in the garbage
-    collector.
+    collector. The set of operations here is restrictive for a good reason
+    - it's better to be safe. Specifically disallowed operations:
+
+    * anything that escapes self
+    * anything that can allocate
     """
     ok_operations = ['ptr_nonzero', 'ptr_eq', 'ptr_ne', 'free', 'same_as',
                      'direct_ptradd', 'force_cast', 'track_alloc_stop',
-                     'raw_free', 'adr_eq', 'adr_ne',
-                     'debug_print']
+                     'raw_free']
 
     def analyze_light_finalizer(self, graph):
-        if getattr(graph.func, '_must_be_light_finalizer_', False):
-            self._must_be_light = graph
-            result = self.analyze_direct_call(graph)
-            del self._must_be_light
-            if result is self.top_result():
-                msg = '%s\nIn %r' % (FinalizerError.__doc__, graph)
-                raise FinalizerError(msg)
-        else:
-            result = self.analyze_direct_call(graph)
-            #if result is self.top_result():
-            #    log.red('old-style non-light finalizer: %r' % (graph,))
+        result = self.analyze_direct_call(graph)
+        if (result is self.top_result() and
+            getattr(graph.func, '_must_be_light_finalizer_', False)):
+            raise FinalizerError(FinalizerError.__doc__, graph)
         return result
 
     def analyze_simple_operation(self, op, graphinfo):
@@ -56,9 +43,4 @@ class FinalizerAnalyzer(graphanalyze.BoolGraphAnalyzer):
             if not isinstance(TP, lltype.Ptr) or TP.TO._gckind == 'raw':
                 # primitive type
                 return self.bottom_result()
-
-        if not hasattr(self, '_must_be_light'):
-            return self.top_result()
-        msg = '%s\nFound this forbidden operation:\n%r\nin %r\nfrom %r' % (
-            FinalizerError.__doc__, op, graphinfo, self._must_be_light)
-        raise FinalizerError(msg)
+        return self.top_result()

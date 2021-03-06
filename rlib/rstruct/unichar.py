@@ -3,34 +3,35 @@ Helpers to pack and unpack a unicode character into raw bytes.
 """
 
 import sys
+from rpython.rlib.runicode import MAXUNICODE
 
-UNICODE_SIZE = 4
+if MAXUNICODE <= 65535:
+    UNICODE_SIZE = 2
+else:
+    UNICODE_SIZE = 4
 BIGENDIAN = sys.byteorder == "big"
 
-def pack_unichar(unich, buf, pos):
-    pack_codepoint(ord(unich), buf, pos)
-
-def pack_codepoint(unich, buf, pos):
+def pack_unichar(unich, charlist):
     if UNICODE_SIZE == 2:
         if BIGENDIAN:
-            buf.setitem(pos,   chr(unich >> 8))
-            buf.setitem(pos+1, chr(unich & 0xFF))
+            charlist.append(chr(ord(unich) >> 8))
+            charlist.append(chr(ord(unich) & 0xFF))
         else:
-            buf.setitem(pos,   chr(unich & 0xFF))
-            buf.setitem(pos+1, chr(unich >> 8))
+            charlist.append(chr(ord(unich) & 0xFF))
+            charlist.append(chr(ord(unich) >> 8))
     else:
         if BIGENDIAN:
-            buf.setitem(pos,   chr(unich >> 24))
-            buf.setitem(pos+1, chr((unich >> 16) & 0xFF))
-            buf.setitem(pos+2, chr((unich >> 8) & 0xFF))
-            buf.setitem(pos+3, chr(unich & 0xFF))
+            charlist.append(chr(ord(unich) >> 24))
+            charlist.append(chr((ord(unich) >> 16) & 0xFF))
+            charlist.append(chr((ord(unich) >> 8) & 0xFF))
+            charlist.append(chr(ord(unich) & 0xFF))
         else:
-            buf.setitem(pos,   chr(unich & 0xFF))
-            buf.setitem(pos+1, chr((unich >> 8) & 0xFF))
-            buf.setitem(pos+2, chr((unich >> 16) & 0xFF))
-            buf.setitem(pos+3, chr(unich >> 24))
+            charlist.append(chr(ord(unich) & 0xFF))
+            charlist.append(chr((ord(unich) >> 8) & 0xFF))
+            charlist.append(chr((ord(unich) >> 16) & 0xFF))
+            charlist.append(chr(ord(unich) >> 24))
 
-def unpack_codepoint(rawstring):
+def unpack_unichar(rawstring):
     assert len(rawstring) == UNICODE_SIZE
     if UNICODE_SIZE == 2:
         if BIGENDIAN:
@@ -50,7 +51,4 @@ def unpack_codepoint(rawstring):
                  ord(rawstring[1]) << 8 |
                  ord(rawstring[2]) << 16 |
                  ord(rawstring[3]) << 24)
-    return n
-
-def unpack_unichar(rawstring):
-    return unichr(unpack_codepoint(rawstring))
+    return unichr(n)

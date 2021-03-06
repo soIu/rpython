@@ -2,21 +2,19 @@ import sys
 import types
 
 from rpython.flowspace.model import Constant
+from rpython.flowspace.operation import op
 from rpython.annotator import description, model as annmodel
 from rpython.rlib.objectmodel import UnboxedValue
 from rpython.tool.pairtype import pairtype, pair
 from rpython.tool.identity_dict import identity_dict
-from rpython.tool.flattenrec import FlattenRecursion
 from rpython.rtyper.extregistry import ExtRegistryEntry
 from rpython.rtyper.error import TyperError
 from rpython.rtyper.lltypesystem import lltype
 from rpython.rtyper.lltypesystem.lltype import (
     Ptr, Struct, GcStruct, malloc, cast_pointer, castable, nullptr,
     RuntimeTypeInfo, getRuntimeTypeInfo, typeOf, Void, FuncType, Bool, Signed,
-    functionptr, attachRuntimeTypeInfo)
+    functionptr)
 from rpython.rtyper.lltypesystem.lloperation import llop
-from rpython.rtyper.llannotation import lltype_to_annotation
-from rpython.rtyper.llannotation import SomePtr
 from rpython.rtyper.lltypesystem import rstr
 from rpython.rtyper.rmodel import (
     Repr, getgcflavor, inputconst, warning, mangle)
@@ -98,7 +96,8 @@ def buildinstancerepr(rtyper, classdef, gcflavor='gc'):
         unboxed = [subdef for subdef in classdef.getallsubdefs() if
             subdef.classdesc.pyobj is not None and
             issubclass(subdef.classdesc.pyobj, UnboxedValue)]
-        virtualizable = classdef.classdesc.get_param('_virtualizable_', False)
+        virtualizable = classdef.classdesc.read_attribute(
+            '_virtualizable_', Constant(False)).value
     config = rtyper.annotator.translator.config
     usetagging = len(unboxed) != 0 and config.translation.taggedpointers
 
@@ -171,9 +170,9 @@ OBJECT_VTABLE.become(Struct('object_vtable',
                             ('subclassrange_max', Signed),
                             ('rtti', Ptr(RuntimeTypeInfo)),
                             ('name', Ptr(rstr.STR)),
+                            ('hash', Signed),
                             ('instantiate', Ptr(FuncType([], OBJECTPTR))),
-                            hints={'immutable': True,
-                                   'static_immutable': True}))
+                            hints={'immutable': True}))
 # non-gc case
 NONGCOBJECT = Struct('nongcobject', ('typeptr', CLASSTYPE))
 NONGCOBJECTPTR = Ptr(NONGCOBJECT)
@@ -251,7 +250,9 @@ class ClassRepr(Repr):
         allmethods = {}
         # class attributes
         llfields = []
-        for name, attrdef in self.classdef.attrs.items():
+        attrs = self.classdef.attrs.items()
+        attrs.sort()
+        for name, attrdef in attrs:
             if attrdef.readonly:
                 s_value = attrdef.s_value
                 s_unboundmethod = self.prepare_method(s_value)
@@ -269,12 +270,10 @@ class ClassRepr(Repr):
             mangled_name = mangle('pbc%d' % counter, attr)
             pbcfields[access_set, attr] = mangled_name, r
             llfields.append((mangled_name, r.lowleveltype))
-        llfields.sort()
-        llfields.sort(key=attr_reverse_size)
         #
         self.rbase = getclassrepr(self.rtyper, self.classdef.basedef)
         self.rbase.setup()
-        kwds = {'hints': {'immutable': True, 'static_immutable': True}}
+        kwds = {'hints': {'immutable': True}}
         vtable_type = Struct('%s_vtable' % self.classdef.name,
                                 ('super', self.rbase.vtable_type),
                                 *llfields, **kwds)
@@ -311,15 +310,10 @@ class ClassRepr(Repr):
         # setup class attributes: for each attribute name at the level
         # of 'r_parentcls', look up its value in the class
         def assign(mangled_name, value):
-            if value is None:
-                llvalue = r.special_uninitialized_value()
-                if llvalue is None:
-                    return
-            else:
-                if (isinstance(value, Constant) and
-                        isinstance(value.value, staticmethod)):
-                    value = Constant(value.value.__get__(42))   # staticmethod => bare function
-                llvalue = r.convert_desc_or_const(value)
+            if (isinstance(value, Constant) and
+                    isinstance(value.value, staticmethod)):
+                value = Constant(value.value.__get__(42))   # staticmethod => bare function
+            llvalue = r.convert_desc_or_const(value)
             setattr(vtable, mangled_name, llvalue)
 
         for fldname in r_parentcls.clsfields:
@@ -327,7 +321,8 @@ class ClassRepr(Repr):
             if r.lowleveltype is Void:
                 continue
             value = self.classdef.classdesc.read_attribute(fldname, None)
-            assign(mangled_name, value)
+            if value is not None:
+                assign(mangled_name, value)
         # extra PBC attributes
         for (access_set, attr), (mangled_name, r) in r_parentcls.pbcfields.items():
             if self.classdef.classdesc not in access_set.descs:
@@ -335,10 +330,12 @@ class ClassRepr(Repr):
             if r.lowleveltype is Void:
                 continue
             attrvalue = self.classdef.classdesc.read_attribute(attr, None)
-            assign(mangled_name, attrvalue)
+            if attrvalue is not None:
+                assign(mangled_name, attrvalue)
 
     def fill_vtable_root(self, vtable):
         """Initialize the head of the vtable."""
+        vtable.hash = hash(self)
         # initialize the 'subclassrange_*' and 'name' fields
         if self.classdef is not None:
             #vtable.parenttypeptr = self.rbase.getvtable()
@@ -449,13 +446,6 @@ class __extend__(annmodel.SomeInstance):
     def rtyper_makekey(self):
         return self.__class__, self.classdef
 
-class __extend__(annmodel.SomeException):
-    def rtyper_makerepr(self, rtyper):
-        return self.as_SomeInstance().rtyper_makerepr(rtyper)
-
-    def rtyper_makekey(self):
-        return self.__class__, frozenset(self.classdefs)
-
 class __extend__(annmodel.SomeType):
     def rtyper_makerepr(self, rtyper):
         return get_type_repr(rtyper)
@@ -476,13 +466,6 @@ class InstanceRepr(Repr):
         self.iprebuiltinstances = identity_dict()
         self.lowleveltype = Ptr(self.object_type)
         self.gcflavor = gcflavor
-
-    def has_special_memory_pressure(self, tp):
-        if 'special_memory_pressure' in tp._flds:
-            return True
-        if 'super' in tp._flds:
-            return self.has_special_memory_pressure(tp._flds['super'])
-        return False
 
     def _setup_repr(self, llfields=None, hints=None, adtmeths=None):
         # NOTE: don't store mutable objects like the dicts below on 'self'
@@ -508,7 +491,19 @@ class InstanceRepr(Repr):
                     fields[name] = mangled_name, r
                     myllfields.append((mangled_name, r.lowleveltype))
 
-            myllfields.sort(key=attr_reverse_size)
+            # Sort the instance attributes by decreasing "likely size",
+            # as reported by rffi.sizeof(), to minimize padding holes in C.
+            # Fields of the same size are sorted by name (by attrs.sort()
+            # above) just to minimize randomness.
+            def keysize((_, T)):
+                if T is lltype.Void:
+                    return None
+                from rpython.rtyper.lltypesystem.rffi import sizeof
+                try:
+                    return -sizeof(T)
+                except StandardError:
+                    return None
+            myllfields.sort(key=keysize)
             if llfields is None:
                 llfields = myllfields
             else:
@@ -532,16 +527,6 @@ class InstanceRepr(Repr):
                 if not attrdef.readonly and self.is_quasi_immutable(name):
                     llfields.append(('mutate_' + name, OBJECTPTR))
 
-            bookkeeper = self.rtyper.annotator.bookkeeper
-            if self.classdef in bookkeeper.memory_pressure_types:
-                # we don't need to add it if it's already there for some of
-                # the parent type
-                if not self.has_special_memory_pressure(self.rbase.object_type):
-                    llfields.append(('special_memory_pressure', lltype.Signed))
-                    fields['special_memory_pressure'] = (
-                        'special_memory_pressure',
-                        self.rtyper.getrepr(lltype_to_annotation(lltype.Signed)))
-
             object_type = MkStruct(self.classdef.name,
                                    ('super', self.rbase.object_type),
                                    hints=hints,
@@ -555,24 +540,26 @@ class InstanceRepr(Repr):
         self.allinstancefields = allinstancefields
 
     def _check_for_immutable_hints(self, hints):
-        hints = hints.copy()
-        classdesc = self.classdef.classdesc
-        immut = classdesc.get_param('_immutable_', inherit=False)
-        if immut is None:
-            if classdesc.get_param('_immutable_', inherit=True):
+        loc = self.classdef.classdesc.lookup('_immutable_')
+        if loc is not None:
+            if loc is not self.classdef.classdesc:
                 raise ImmutableConflictError(
                     "class %r inherits from its parent _immutable_=True, "
                     "so it should also declare _immutable_=True" % (
                         self.classdef,))
-        elif immut is not True:
-            raise TyperError(
-                "class %r: _immutable_ = something else than True" % (
-                    self.classdef,))
-        else:
+            if loc.classdict.get('_immutable_').value is not True:
+                raise TyperError(
+                    "class %r: _immutable_ = something else than True" % (
+                        self.classdef,))
+            hints = hints.copy()
             hints['immutable'] = True
-        self.immutable_field_set = classdesc.immutable_fields
-        if (classdesc.immutable_fields or
-                'immutable_fields' in self.rbase.object_type._hints):
+        self.immutable_field_set = set()  # unless overwritten below
+        if self.classdef.classdesc.lookup('_immutable_fields_') is not None:
+            hints = hints.copy()
+            immutable_fields = self.classdef.classdesc.classdict.get(
+                '_immutable_fields_')
+            if immutable_fields is not None:
+                self.immutable_field_set = set(immutable_fields.value)
             accessor = FieldListAccessor()
             hints['immutable_fields'] = accessor
         return hints
@@ -604,25 +591,17 @@ class InstanceRepr(Repr):
                 assert len(s_func.descriptions) == 1
                 funcdesc, = s_func.descriptions
                 graph = funcdesc.getuniquegraph()
-                self.check_graph_of_del_does_not_call_too_much(self.rtyper,
-                                                               graph)
+                self.check_graph_of_del_does_not_call_too_much(graph)
                 FUNCTYPE = FuncType([Ptr(source_repr.object_type)], Void)
                 destrptr = functionptr(FUNCTYPE, graph.name,
                                        graph=graph,
                                        _callable=graph.func)
             else:
                 destrptr = None
-            self.rtyper.call_all_setups()  # compute ForwardReferences now
-            args_s = [SomePtr(Ptr(OBJECT))]
-            graph = self.rtyper.annotate_helper(ll_runtime_type_info, args_s)
-            s = self.rtyper.annotation(graph.getreturnvar())
-            if (not isinstance(s, SomePtr) or
-                s.ll_ptrtype != Ptr(RuntimeTypeInfo)):
-                raise TyperError("runtime type info function returns %r, "
-                                "expected Ptr(RuntimeTypeInfo)" % (s))
-            funcptr = self.rtyper.getcallable(graph)
-            attachRuntimeTypeInfo(self.object_type, funcptr, destrptr)
-
+            OBJECT = OBJECT_BY_FLAVOR[LLFLAVOR[self.gcflavor]]
+            self.rtyper.attachRuntimeTypeInfoFunc(self.object_type,
+                                                  ll_runtime_type_info,
+                                                  OBJECT, destrptr)
             vtable = self.rclass.getvtable()
             self.rtyper.set_type_for_typeptr(vtable, self.lowleveltype.TO)
 
@@ -636,40 +615,26 @@ class InstanceRepr(Repr):
                 while rbase.classdef is not None:
                     immutable_fields.update(rbase.immutable_field_set)
                     rbase = rbase.rbase
-                self._parse_field_list(immutable_fields, accessor, hints)
+                self._parse_field_list(immutable_fields, accessor)
 
-    def _parse_field_list(self, fields, accessor, hints):
+    def _parse_field_list(self, fields, accessor):
         ranking = {}
-        for fullname in fields:
-            name = fullname
-            quasi = False
+        for name in fields:
             if name.endswith('?[*]'):   # a quasi-immutable field pointing to
                 name = name[:-4]        # an immutable array
                 rank = IR_QUASIIMMUTABLE_ARRAY
-                quasi = True
             elif name.endswith('[*]'):    # for virtualizables' lists
                 name = name[:-3]
                 rank = IR_IMMUTABLE_ARRAY
             elif name.endswith('?'):    # a quasi-immutable field
                 name = name[:-1]
                 rank = IR_QUASIIMMUTABLE
-                quasi = True
             else:                       # a regular immutable/green field
                 rank = IR_IMMUTABLE
             try:
                 mangled_name, r = self._get_field(name)
             except KeyError:
                 continue
-            if quasi and hints.get("immutable"):
-                raise TyperError(
-                    "can't have _immutable_ = True and a quasi-immutable field "
-                    "%s in class %s" % (name, self.classdef))
-            if rank in (IR_QUASIIMMUTABLE_ARRAY, IR_IMMUTABLE_ARRAY):
-                from rpython.rtyper.rlist import AbstractBaseListRepr
-                if not isinstance(r, AbstractBaseListRepr):
-                    raise TyperError(
-                        "_immutable_fields_ = [%r] in %r, but %r is not a list "
-                        "(got %r)" % (fullname, self, name, r))
             ranking[mangled_name] = rank
         accessor.initialize(self.object_type, ranking)
         return ranking
@@ -682,8 +647,6 @@ class InstanceRepr(Repr):
         while base.classdef is not None:
             base = base.rbase
             for fieldname in base.fields:
-                if fieldname == 'special_memory_pressure':
-                    continue
                 try:
                     mangled, r = base._get_field(fieldname)
                 except KeyError:
@@ -725,12 +688,10 @@ class InstanceRepr(Repr):
             rbase = rbase.rbase
         return False
 
-    def new_instance(self, llops, classcallhop=None, nonmovable=False):
+    def new_instance(self, llops, classcallhop=None):
         """Build a new instance, without calling __init__."""
         flavor = self.gcflavor
         flags = {'flavor': flavor}
-        if nonmovable:
-            flags['nonmovable'] = True
         ctype = inputconst(Void, self.object_type)
         cflags = inputconst(Void, flags)
         vlist = [ctype, cflags]
@@ -738,9 +699,6 @@ class InstanceRepr(Repr):
                            resulttype=Ptr(self.object_type))
         ctypeptr = inputconst(CLASSTYPE, self.rclass.getvtable())
         self.setfield(vptr, '__class__', ctypeptr, llops)
-        if self.has_special_memory_pressure(self.object_type):
-            self.setfield(vptr, 'special_memory_pressure',
-                inputconst(lltype.Signed, 0), llops)
         # initialize instance attributes from their defaults from the class
         if self.classdef is not None:
             flds = self.allinstancefields.keys()
@@ -809,13 +767,11 @@ class InstanceRepr(Repr):
             self.initialize_prebuilt_data(Ellipsis, self.classdef, result)
             return result
 
-    _initialize_data_flattenrec = FlattenRecursion()
-
     def initialize_prebuilt_instance(self, value, classdef, result):
         # must fill in the hash cache before the other ones
         # (see test_circular_hash_initialization)
-        self._initialize_data_flattenrec(self.initialize_prebuilt_data,
-                                         value, classdef, result)
+        self.initialize_prebuilt_hash(value, result)
+        self.initialize_prebuilt_data(value, classdef, result)
 
     def get_ll_hash_function(self):
         return ll_inst_hash
@@ -868,18 +824,18 @@ class InstanceRepr(Repr):
         from rpython.rtyper.lltypesystem.ll_str import ll_int2hex
         from rpython.rlib.rarithmetic import r_uint
         if not i:
-            return rstr.conststr("NULL")
+            return rstr.null_str
         instance = cast_pointer(OBJECTPTR, i)
         # Two choices: the first gives a fast answer but it can change
         # (typically only once) during the life of the object.
         #uid = r_uint(cast_ptr_to_int(i))
         uid = r_uint(llop.gc_id(lltype.Signed, i))
         #
-        res = rstr.conststr("<")
+        res = rstr.instance_str_prefix
         res = rstr.ll_strconcat(res, instance.typeptr.name)
-        res = rstr.ll_strconcat(res, rstr.conststr(" object at 0x"))
+        res = rstr.ll_strconcat(res, rstr.instance_str_infix)
         res = rstr.ll_strconcat(res, ll_int2hex(uid, False))
-        res = rstr.ll_strconcat(res, rstr.conststr(">"))
+        res = rstr.ll_strconcat(res, rstr.instance_str_suffix)
         return res
 
     def get_ll_eq_function(self):
@@ -888,8 +844,7 @@ class InstanceRepr(Repr):
     def can_ll_be_null(self, s_value):
         return s_value.can_be_none()
 
-    @staticmethod
-    def check_graph_of_del_does_not_call_too_much(rtyper, graph):
+    def check_graph_of_del_does_not_call_too_much(self, graph):
         # RPython-level __del__() methods should not do "too much".
         # In the PyPy Python interpreter, they usually do simple things
         # like file.__del__() closing the file descriptor; or if they
@@ -902,7 +857,7 @@ class InstanceRepr(Repr):
         #
         # XXX wrong complexity, but good enough because the set of
         # reachable graphs should be small
-        callgraph = rtyper.annotator.translator.callgraph.values()
+        callgraph = self.rtyper.annotator.translator.callgraph.values()
         seen = {graph: None}
         while True:
             oldlength = len(seen)
@@ -957,9 +912,9 @@ class InstanceRepr(Repr):
                             name, None)
                         if attrvalue is None:
                             # Ellipsis from get_reusable_prebuilt_instance()
-                            #if value is not Ellipsis:
-                                #warning("prebuilt instance %r has no "
-                                #        "attribute %r" % (value, name))
+                            if value is not Ellipsis:
+                                warning("prebuilt instance %r has no "
+                                        "attribute %r" % (value, name))
                             llattrvalue = r.lowleveltype._defl()
                         else:
                             llattrvalue = r.convert_desc_or_const(attrvalue)
@@ -970,6 +925,11 @@ class InstanceRepr(Repr):
             # OBJECT part
             rclass = getclassrepr(self.rtyper, classdef)
             result.typeptr = rclass.getvtable()
+
+    def initialize_prebuilt_hash(self, value, result):
+        llattrvalue = getattr(value, '__precomputed_identity_hash', None)
+        if llattrvalue is not None:
+            lltype.init_identity_hash(result, llattrvalue)
 
     def getfieldrepr(self, attr):
         """Return the repr used for the given attribute."""
@@ -1072,10 +1032,9 @@ class __extend__(pairtype(InstanceRepr, InstanceRepr)):
 
 # ____________________________________________________________
 
-def rtype_new_instance(rtyper, classdef, llops, classcallhop=None,
-                       nonmovable=False):
+def rtype_new_instance(rtyper, classdef, llops, classcallhop=None):
     rinstance = getinstancerepr(rtyper, classdef)
-    return rinstance.new_instance(llops, classcallhop, nonmovable=nonmovable)
+    return rinstance.new_instance(llops, classcallhop)
 
 def ll_inst_hash(ins):
     if not ins:
@@ -1102,18 +1061,6 @@ def fishllattr(inst, name, default=_missing):
                              (lltype.typeOf(widest), name))
     return default
 
-def attr_reverse_size((_, T)):
-    # This is used to sort the instance or class attributes by decreasing
-    # "likely size", as reported by rffi.sizeof(), to minimize padding
-    # holes in C.  Fields should first be sorted by name, just to minimize
-    # randomness, and then (stably) sorted by 'attr_reverse_size'.
-    if T is lltype.Void:
-        return None
-    from rpython.rtyper.lltypesystem.rffi import sizeof
-    try:
-        return -sizeof(T)
-    except StandardError:
-        return None
 
 # ____________________________________________________________
 #

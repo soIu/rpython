@@ -20,7 +20,6 @@ class SimpleArenaCollection(object):
         self.small_request_threshold = small_request_threshold
         self.all_objects = []
         self.total_memory_used = 0
-        self.arenas_count = 0
 
     def malloc(self, size):
         nsize = raw_malloc_usage(size)

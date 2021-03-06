@@ -108,9 +108,9 @@ class RffiBuilder(object):
             if isinstance(value, ctypes._CFuncPtr):
                 try:    
                     self.proc_func(value)
-                except NotImplementedError as e:
+                except NotImplementedError, e:
                     print "genrffi: skipped:", key, value, e
-                except TypeError as e:
+                except TypeError, e:
                     print "genrffi: skipped:", key, value, e
 
 

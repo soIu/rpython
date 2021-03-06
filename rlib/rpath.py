@@ -4,9 +4,6 @@ Minimal (and limited) RPython version of some functions contained in os.path.
 
 import os, stat
 from rpython.rlib import rposix
-from rpython.rlib.signature import signature
-from rpython.rlib.rstring import assert_str0
-from rpython.annotator.model import s_Str0
 
 
 # ____________________________________________________________
@@ -32,11 +29,9 @@ def _posix_risabs(s):
     """Test whether a path is absolute"""
     return s.startswith('/')
 
-@signature(s_Str0, returns=s_Str0)
 def _posix_rnormpath(path):
     """Normalize path, eliminating double slashes, etc."""
     slash, dot = '/', '.'
-    assert_str0(dot)
     if path == '':
         return dot
     initial_slashes = path.startswith('/')
@@ -59,10 +54,8 @@ def _posix_rnormpath(path):
     path = slash.join(comps)
     if initial_slashes:
         path = slash*initial_slashes + path
-    assert_str0(path)
     return path or dot
 
-@signature(s_Str0, returns=s_Str0)
 def _posix_rabspath(path):
     """Return an absolute, **non-normalized** path.
       **This version does not let exceptions propagate.**"""
@@ -70,7 +63,6 @@ def _posix_rabspath(path):
         if not _posix_risabs(path):
             cwd = os.getcwd()
             path = _posix_rjoin(cwd, path)
-        assert path is not None
         return _posix_rnormpath(path)
     except OSError:
         return path
@@ -150,12 +142,11 @@ def _nt_rnormpath(path):
         comps.append(dot)
     return prefix + backslash.join(comps)
 
-@signature(s_Str0, returns=s_Str0)
 def _nt_rabspath(path):
     try:
         if path == '':
             path = os.getcwd()
-        return rposix.getfullpathname(path)
+        return rposix._getfullpathname(path)
     except OSError:
         return path
 

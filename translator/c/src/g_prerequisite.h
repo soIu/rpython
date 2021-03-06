@@ -23,7 +23,3 @@ typedef unsigned char bool_t;
 # define RPY_LENGTH0     1       /* array decl [0] are bad */
 # define RPY_DUMMY_VARLENGTH     /* nothing */
 #endif
-
-#ifdef RPY_REVERSE_DEBUGGER
-#include "src-revdb/revdb_preinclude.h"
-#endif

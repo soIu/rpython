@@ -1,5 +1,5 @@
 from hashlib import md5
-import py, os, sys
+import py, os
 
 def cache_file_path(c_files, eci, cachename):
     "Builds a filename to cache compilation data"
@@ -26,8 +26,6 @@ def build_executable_cache(c_files, eci, ignore_errors=False):
             if ignore_errors:
                 platform.log_errors = False
             result = platform.execute(platform.compile(c_files, eci))
-            if result.err:
-                sys.stderr.write(result.err)
         finally:
             if ignore_errors:
                 del platform.log_errors
@@ -35,8 +33,7 @@ def build_executable_cache(c_files, eci, ignore_errors=False):
             # compare equal to another instance without it
             if platform.log_errors != _previous:
                 platform.log_errors = _previous
-        if not result.err:
-            try_atomic_write(path, result.out)
+        try_atomic_write(path, result.out)
         return result.out
 
 def try_atomic_write(path, data):

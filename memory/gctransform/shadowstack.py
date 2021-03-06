@@ -3,7 +3,6 @@ from rpython.rtyper.llannotation import SomePtr
 from rpython.rlib.debug import ll_assert
 from rpython.rlib.nonconst import NonConstant
 from rpython.rlib import rgc
-from rpython.rlib.objectmodel import specialize
 from rpython.rtyper import rmodel
 from rpython.rtyper.annlowlevel import llhelper
 from rpython.rtyper.lltypesystem import lltype, llmemory
@@ -11,7 +10,6 @@ from rpython.rtyper.llannotation import SomeAddress
 from rpython.memory.gctransform.framework import (
      BaseFrameworkGCTransformer, BaseRootWalker, sizeofaddr)
 from rpython.rtyper.rbuiltin import gen_cast
-from rpython.memory.gctransform.log import log
 
 
 class ShadowStackFrameworkGCTransformer(BaseFrameworkGCTransformer):
@@ -31,43 +29,30 @@ class ShadowStackFrameworkGCTransformer(BaseFrameworkGCTransformer):
     def push_roots(self, hop, keep_current_args=False):
         livevars = self.get_livevars_for_roots(hop, keep_current_args)
         self.num_pushs += len(livevars)
-        hop.genop("gc_push_roots", livevars)
+        if not livevars:
+            return []
+        c_len = rmodel.inputconst(lltype.Signed, len(livevars) )
+        base_addr = hop.genop("direct_call", [self.incr_stack_ptr, c_len ],
+                              resulttype=llmemory.Address)
+        for k,var in enumerate(livevars):
+            c_k = rmodel.inputconst(lltype.Signed, k * sizeofaddr)
+            v_adr = gen_cast(hop.llops, llmemory.Address, var)
+            hop.genop("raw_store", [base_addr, c_k, v_adr])
         return livevars
 
     def pop_roots(self, hop, livevars):
-        hop.genop("gc_pop_roots", livevars)
-        # NB. we emit it even if len(livevars) == 0; this is needed for
-        # shadowcolor.move_pushes_earlier()
-
-
-@specialize.call_location()
-def walk_stack_root(invoke, arg0, arg1, start, addr, is_minor):
-    skip = 0
-    while addr != start:
-        addr -= sizeofaddr
-        #XXX reintroduce support for tagged values?
-        #if gc.points_to_valid_gc_object(addr):
-        #    callback(gc, addr)
-
-        if skip & 1 == 0:
-            content = addr.address[0]
-            n = llmemory.cast_adr_to_int(content)
-            if n & 1 == 0:
-                if content:   # non-0, non-odd: a regular ptr
-                    invoke(arg0, arg1, addr)
-            else:
-                # odd number: a skip bitmask
-                if n > 0:       # initially, an unmarked value
-                    if is_minor:
-                        newcontent = llmemory.cast_int_to_adr(-n)
-                        addr.address[0] = newcontent   # mark
-                    skip = n
-                else:
-                    # a marked value
-                    if is_minor:
-                        return
-                    skip = -n
-        skip >>= 1
+        if not livevars:
+            return
+        c_len = rmodel.inputconst(lltype.Signed, len(livevars) )
+        base_addr = hop.genop("direct_call", [self.decr_stack_ptr, c_len ],
+                              resulttype=llmemory.Address)
+        if self.gcdata.gc.moving_gc:
+            # for moving collectors, reload the roots into the local variables
+            for k,var in enumerate(livevars):
+                c_k = rmodel.inputconst(lltype.Signed, k * sizeofaddr)
+                v_newaddr = hop.genop("raw_load", [base_addr, c_k],
+                                      resulttype=llmemory.Address)
+                hop.genop("gc_reload_possibly_moved", [v_newaddr, var])
 
 
 class ShadowStackRootWalker(BaseRootWalker):
@@ -75,7 +60,6 @@ class ShadowStackRootWalker(BaseRootWalker):
         BaseRootWalker.__init__(self, gctransformer)
         # NB. 'self' is frozen, but we can use self.gcdata to store state
         gcdata = self.gcdata
-        gcdata.can_look_at_partial_stack = True
 
         def incr_stack(n):
             top = gcdata.root_stack_top
@@ -89,8 +73,14 @@ class ShadowStackRootWalker(BaseRootWalker):
             return top
         self.decr_stack = decr_stack
 
-        self.invoke_collect_stack_root = specialize.call_location()(
-            lambda arg0, arg1, addr: arg0(self.gc, addr))
+        def walk_stack_root(callback, start, end):
+            gc = self.gc
+            addr = end
+            while addr != start:
+                addr -= sizeofaddr
+                if gc.points_to_valid_gc_object(addr):
+                    callback(gc, addr)
+        self.rootstackhook = walk_stack_root
 
         self.shadow_stack_pool = ShadowStackPool(gcdata)
         rsd = gctransformer.root_stack_depth
@@ -110,22 +100,9 @@ class ShadowStackRootWalker(BaseRootWalker):
         BaseRootWalker.setup_root_walker(self)
 
     def walk_stack_roots(self, collect_stack_root, is_minor=False):
-        # Note that if we're the first minor collection after a thread
-        # switch, then we also need to disable the 'is_minor'
-        # optimization.  The reason is subtle: we need to walk the whole
-        # stack because otherwise, we can be in the middle of an
-        # incremental major collection, and the new stack was just moved
-        # off a ShadowStackRef object (gctransform/shadowstack.py) which
-        # was not seen yet.  We might completely miss some old objects
-        # from the parts of that stack that are skipped by this is_minor
-        # optimization.
         gcdata = self.gcdata
-        if is_minor and not gcdata.can_look_at_partial_stack:
-            is_minor = False
-            gcdata.can_look_at_partial_stack = True
-        walk_stack_root(self.invoke_collect_stack_root, collect_stack_root,
-                        None, gcdata.root_stack_base, gcdata.root_stack_top,
-                        is_minor=is_minor)
+        self.rootstackhook(collect_stack_root,
+                           gcdata.root_stack_base, gcdata.root_stack_top)
 
     def need_thread_support(self, gctransformer, getfn):
         from rpython.rlib import rthread    # xxx fish
@@ -203,7 +180,7 @@ class ShadowStackRootWalker(BaseRootWalker):
                 thread_stacks[gcdata.active_tid] = old_ref
             #
             # no GC operation from here -- switching shadowstack!
-            shadow_stack_pool.save_current_state_away(old_ref)
+            shadow_stack_pool.save_current_state_away(old_ref, llmemory.NULL)
             if new_ref:
                 shadow_stack_pool.restore_state_from(new_ref)
             else:
@@ -231,7 +208,7 @@ class ShadowStackRootWalker(BaseRootWalker):
 
         self.thread_setup = thread_setup
         self.thread_run_ptr = getfn(thread_run, [], annmodel.s_None,
-                                    minimal_transform=False)
+                                    inline=True, minimal_transform=False)
         self.thread_die_ptr = getfn(thread_die, [], annmodel.s_None,
                                     minimal_transform=False)
         # no thread_before_fork_ptr here
@@ -242,33 +219,67 @@ class ShadowStackRootWalker(BaseRootWalker):
                                            minimal_transform=False)
 
     def need_stacklet_support(self, gctransformer, getfn):
-        from rpython.rlib import _stacklet_shadowstack
-        _stacklet_shadowstack.complete_destrptr(gctransformer)
+        shadow_stack_pool = self.shadow_stack_pool
+        SHADOWSTACKREF = get_shadowstackref(self, gctransformer)
 
-        gcdata = self.gcdata
-        def gc_modified_shadowstack():
-            gcdata.can_look_at_partial_stack = False
+        def gc_shadowstackref_new():
+            ssref = shadow_stack_pool.allocate(SHADOWSTACKREF)
+            return lltype.cast_opaque_ptr(llmemory.GCREF, ssref)
 
-        self.gc_modified_shadowstack_ptr = getfn(gc_modified_shadowstack,
-                                                 [], annmodel.s_None)
+        def gc_shadowstackref_context(gcref):
+            ssref = lltype.cast_opaque_ptr(lltype.Ptr(SHADOWSTACKREF), gcref)
+            return ssref.context
 
-    def postprocess_graph(self, gct, graph, any_inlining):
-        from rpython.memory.gctransform import shadowcolor
-        if any_inlining:
-            shadowcolor.postprocess_inlining(graph)
-        use_push_pop = shadowcolor.postprocess_graph(graph, gct.c_const_gcdata)
-        if use_push_pop and graph in gct.graphs_to_inline:
-            log.WARNING("%r is marked for later inlining, "
-                        "but is using push/pop roots.  Disabled" % (graph,))
-            del gct.graphs_to_inline[graph]
+        def gc_save_current_state_away(gcref, ncontext):
+            ssref = lltype.cast_opaque_ptr(lltype.Ptr(SHADOWSTACKREF), gcref)
+            shadow_stack_pool.save_current_state_away(ssref, ncontext)
+
+        def gc_forget_current_state():
+            shadow_stack_pool.forget_current_state()
+
+        def gc_restore_state_from(gcref):
+            ssref = lltype.cast_opaque_ptr(lltype.Ptr(SHADOWSTACKREF), gcref)
+            shadow_stack_pool.restore_state_from(ssref)
+
+        def gc_start_fresh_new_state():
+            shadow_stack_pool.start_fresh_new_state()
+
+        s_gcref = SomePtr(llmemory.GCREF)
+        s_addr = SomeAddress()
+        self.gc_shadowstackref_new_ptr = getfn(gc_shadowstackref_new,
+                                               [], s_gcref,
+                                               minimal_transform=False)
+        self.gc_shadowstackref_context_ptr = getfn(gc_shadowstackref_context,
+                                                   [s_gcref], s_addr,
+                                                   inline=True)
+        self.gc_save_current_state_away_ptr = getfn(gc_save_current_state_away,
+                                                    [s_gcref, s_addr],
+                                                    annmodel.s_None,
+                                                    inline=True)
+        self.gc_forget_current_state_ptr = getfn(gc_forget_current_state,
+                                                 [], annmodel.s_None,
+                                                 inline=True)
+        self.gc_restore_state_from_ptr = getfn(gc_restore_state_from,
+                                               [s_gcref], annmodel.s_None,
+                                               inline=True)
+        self.gc_start_fresh_new_state_ptr = getfn(gc_start_fresh_new_state,
+                                                  [], annmodel.s_None,
+                                                  inline=True)
 
 # ____________________________________________________________
 
 class ShadowStackPool(object):
-    """Manages a pool of shadowstacks.
+    """Manages a pool of shadowstacks.  The MAX most recently used
+    shadowstacks are fully allocated and can be directly jumped into
+    (called "full stacks" below).
+    The rest are stored in a more virtual-memory-friendly way, i.e.
+    with just the right amount malloced.  Before they can run, they
+    must be copied into a full shadowstack.
     """
     _alloc_flavor_ = "raw"
     root_stack_depth = 163840
+
+    MAX = 20
 
     def __init__(self, gcdata):
         self.unused_full_stack = llmemory.NULL
@@ -282,18 +293,28 @@ class ShadowStackPool(object):
         """Allocate an empty SHADOWSTACKREF object."""
         return lltype.malloc(SHADOWSTACKREF, zero=True)
 
-    def save_current_state_away(self, shadowstackref):
+    def save_current_state_away(self, shadowstackref, ncontext):
         """Save the current state away into 'shadowstackref'.
         This either works, or raise MemoryError and nothing is done.
         To do a switch, first call save_current_state_away() or
         forget_current_state(), and then call restore_state_from()
         or start_fresh_new_state().
         """
-        self._prepare_unused_stack()
+        fresh_free_fullstack = shadowstackref.prepare_free_slot()
+        if self.unused_full_stack:
+            if fresh_free_fullstack:
+                llmemory.raw_free(fresh_free_fullstack)
+        elif fresh_free_fullstack:
+            self.unused_full_stack = fresh_free_fullstack
+        else:
+            self._prepare_unused_stack()
+        #
         shadowstackref.base = self.gcdata.root_stack_base
         shadowstackref.top  = self.gcdata.root_stack_top
+        shadowstackref.context = ncontext
         ll_assert(shadowstackref.base <= shadowstackref.top,
                   "save_current_state_away: broken shadowstack")
+        shadowstackref.attach()
         #
         # cannot use llop.gc_writebarrier() here, because
         # we are in a minimally-transformed GC helper :-/
@@ -316,9 +337,9 @@ class ShadowStackPool(object):
         ll_assert(bool(shadowstackref.base), "empty shadowstackref!")
         ll_assert(shadowstackref.base <= shadowstackref.top,
                   "restore_state_from: broken shadowstack")
+        self.unused_full_stack = shadowstackref.rebuild(self.unused_full_stack)
         self.gcdata.root_stack_base = shadowstackref.base
         self.gcdata.root_stack_top  = shadowstackref.top
-        self.gcdata.can_look_at_partial_stack = False
         self._cleanup(shadowstackref)
 
     def start_fresh_new_state(self):
@@ -329,30 +350,132 @@ class ShadowStackPool(object):
     def _cleanup(self, shadowstackref):
         shadowstackref.base = llmemory.NULL
         shadowstackref.top = llmemory.NULL
+        shadowstackref.context = llmemory.NULL
 
     def _prepare_unused_stack(self):
+        ll_assert(self.unused_full_stack == llmemory.NULL,
+                  "already an unused_full_stack")
+        root_stack_size = sizeofaddr * self.root_stack_depth
+        self.unused_full_stack = llmemory.raw_malloc(root_stack_size)
         if self.unused_full_stack == llmemory.NULL:
-            root_stack_size = sizeofaddr * self.root_stack_depth
-            self.unused_full_stack = llmemory.raw_malloc(root_stack_size)
-            if self.unused_full_stack == llmemory.NULL:
-                raise MemoryError
+            raise MemoryError
 
 
 def get_shadowstackref(root_walker, gctransformer):
     if hasattr(gctransformer, '_SHADOWSTACKREF'):
         return gctransformer._SHADOWSTACKREF
 
+    # Helpers to same virtual address space by limiting to MAX the
+    # number of full shadow stacks.  If there are more, we compact
+    # them into a separately-allocated zone of memory of just the right
+    # size.  See the comments in the definition of fullstack_cache below.
+
+    def ll_prepare_free_slot(_unused):
+        """Free up a slot in the array of MAX entries, ready for storing
+        a new shadowstackref.  Return the memory of the now-unused full
+        shadowstack.
+        """
+        index = fullstack_cache[0]
+        if index > 0:
+            return llmemory.NULL     # there is already at least one free slot
+        #
+        # make a compact copy in one old entry and return the
+        # original full-sized memory
+        index = -index
+        ll_assert(index > 0, "prepare_free_slot: cache[0] == 0")
+        compacting = lltype.cast_int_to_ptr(SHADOWSTACKREFPTR,
+                                            fullstack_cache[index])
+        index += 1
+        if index >= ShadowStackPool.MAX:
+            index = 1
+        fullstack_cache[0] = -index    # update to the next value in order
+        #
+        compacting.detach()
+        original = compacting.base
+        size = compacting.top - original
+        new = llmemory.raw_malloc(size)
+        if new == llmemory.NULL:
+            return llmemory.NULL
+        llmemory.raw_memcopy(original, new, size)
+        compacting.base = new
+        compacting.top = new + size
+        return original
+
+    def ll_attach(shadowstackref):
+        """After prepare_free_slot(), store a shadowstackref in that slot."""
+        index = fullstack_cache[0]
+        ll_assert(index > 0, "fullstack attach: no free slot")
+        fullstack_cache[0] = fullstack_cache[index]
+        fullstack_cache[index] = lltype.cast_ptr_to_int(shadowstackref)
+        ll_assert(shadowstackref.fsindex == 0, "fullstack attach: already one?")
+        shadowstackref.fsindex = index    # > 0
+
+    def ll_detach(shadowstackref):
+        """Detach a shadowstackref from the array of MAX entries."""
+        index = shadowstackref.fsindex
+        ll_assert(index > 0, "detach: unattached shadowstackref")
+        ll_assert(fullstack_cache[index] ==
+                  lltype.cast_ptr_to_int(shadowstackref),
+                  "detach: bad fullstack_cache")
+        shadowstackref.fsindex = 0
+        fullstack_cache[index] = fullstack_cache[0]
+        fullstack_cache[0] = index
+
+    def ll_rebuild(shadowstackref, fullstack_base):
+        if shadowstackref.fsindex > 0:
+            shadowstackref.detach()
+            return fullstack_base
+        else:
+            # make an expanded copy of the compact shadowstack stored in
+            # 'shadowstackref' and free that
+            compact = shadowstackref.base
+            size = shadowstackref.top - compact
+            shadowstackref.base = fullstack_base
+            shadowstackref.top = fullstack_base + size
+            llmemory.raw_memcopy(compact, fullstack_base, size)
+            llmemory.raw_free(compact)
+            return llmemory.NULL
+
     SHADOWSTACKREFPTR = lltype.Ptr(lltype.GcForwardReference())
     SHADOWSTACKREF = lltype.GcStruct('ShadowStackRef',
-                                     ('base', llmemory.Address),
-                                     ('top', llmemory.Address),
-                                     rtti=True)
+        ('base', llmemory.Address),
+        ('top', llmemory.Address),
+        ('context', llmemory.Address),
+        ('fsindex', lltype.Signed),
+        rtti=True,
+        adtmeths={'prepare_free_slot': ll_prepare_free_slot,
+                  'attach': ll_attach,
+                  'detach': ll_detach,
+                  'rebuild': ll_rebuild})
     SHADOWSTACKREFPTR.TO.become(SHADOWSTACKREF)
+
+    # Items 1..MAX-1 of the following array can be SHADOWSTACKREF
+    # addresses cast to integer.  Or, they are small numbers and they
+    # make up a free list, rooted in item 0, which goes on until
+    # terminated with a negative item.  This negative item gives (the
+    # opposite of) the index of the entry we try to remove next.
+    # Initially all items are in this free list and the end is '-1'.
+    fullstack_cache = lltype.malloc(lltype.Array(lltype.Signed),
+                                    ShadowStackPool.MAX,
+                                    flavor='raw', immortal=True)
+    for i in range(len(fullstack_cache) - 1):
+        fullstack_cache[i] = i + 1
+    fullstack_cache[len(fullstack_cache) - 1] = -1
 
     def customtrace(gc, obj, callback, arg):
         obj = llmemory.cast_adr_to_ptr(obj, SHADOWSTACKREFPTR)
-        walk_stack_root(gc._trace_callback, callback, arg, obj.base, obj.top,
-                        is_minor=False)   # xxx optimize?
+        index = obj.fsindex
+        if index > 0:
+            # Haaaaaaack: fullstack_cache[] is just an integer, so it
+            # doesn't follow the SHADOWSTACKREF when it moves.  But we
+            # know this customtrace() will be called just after the
+            # move.  So we fix the fullstack_cache[] now... :-/
+            fullstack_cache[index] = lltype.cast_ptr_to_int(obj)
+        addr = obj.top
+        start = obj.base
+        while addr != start:
+            addr -= sizeofaddr
+            gc._trace_callback(callback, arg, addr)
 
     gc = gctransformer.gcdata.gc
     assert not hasattr(gc, 'custom_trace_dispatcher')
@@ -361,10 +484,22 @@ def get_shadowstackref(root_walker, gctransformer):
         (SHADOWSTACKREF, customtrace))
 
     def shadowstack_destructor(shadowstackref):
+        if root_walker.stacklet_support:
+            from rpython.rlib import _rffi_stacklet as _c
+            h = shadowstackref.context
+            h = llmemory.cast_adr_to_ptr(h, _c.handle)
+            shadowstackref.context = llmemory.NULL
+        #
+        if shadowstackref.fsindex > 0:
+            shadowstackref.detach()
         base = shadowstackref.base
         shadowstackref.base    = llmemory.NULL
         shadowstackref.top     = llmemory.NULL
         llmemory.raw_free(base)
+        #
+        if root_walker.stacklet_support:
+            if h:
+                _c.destroy(h)
 
     destrptr = gctransformer.annotate_helper(shadowstack_destructor,
                                              [SHADOWSTACKREFPTR], lltype.Void)

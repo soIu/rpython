@@ -1,6 +1,4 @@
 import py
-py.test.skip("XXX FIX ME OR KILL ME")
-
 from rpython.jit.metainterp.history import (AbstractFailDescr,
                                          AbstractDescr,
                                          BasicFailDescr,

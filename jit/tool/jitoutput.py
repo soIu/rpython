@@ -17,7 +17,6 @@ REGEXES = [
     (('guards',), '^guards:\s+(\d+)$'),
     (('opt_ops',), '^opt ops:\s+(\d+)$'),
     (('opt_guards',), '^opt guards:\s+(\d+)$'),
-    (('opt_guards_shared',), '^opt guards shared:\s+(\d+)$'),
     (('forcings',), '^forcings:\s+(\d+)$'),
     (('abort.trace_too_long',), '^abort: trace too long:\s+(\d+)$'),
     (('abort.compiling',), '^abort: compiling:\s+(\d+)$'),
@@ -27,8 +26,6 @@ REGEXES = [
     (('nvirtuals',), '^nvirtuals:\s+(\d+)$'),
     (('nvholes',), '^nvholes:\s+(\d+)$'),
     (('nvreused',), '^nvreused:\s+(\d+)$'),
-    (('vecopt_tried',), '^vecopt tried:\s+(\d+)$'),
-    (('vecopt_success',), '^vecopt success:\s+(\d+)$'),
     (('total_compiled_loops',),   '^Total # of loops:\s+(\d+)$'),
     (('total_compiled_bridges',), '^Total # of bridges:\s+(\d+)$'),
     (('total_freed_loops',),      '^Freed # of loops:\s+(\d+)$'),
@@ -60,8 +57,6 @@ class OutputInfo(object):
     nvirtuals = 0
     nvholes = 0
     nvreused = 0
-    vecopt_tried = 0
-    vecopt_success = 0
 
     def __init__(self):
         self.ops = Ops()

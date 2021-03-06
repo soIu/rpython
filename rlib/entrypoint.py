@@ -1,4 +1,4 @@
-secondary_entrypoints = {"main": []}
+secondary_entrypoints = {}
 
 import py
 from rpython.rtyper.lltypesystem import lltype, rffi
@@ -23,10 +23,10 @@ def jit_entrypoint(argtypes, restype, c_name):
     return deco
 
 def entrypoint_lowlevel(key, argtypes, c_name=None, relax=False):
-    """ Note: entrypoint should acquire the GIL and call
-    llop.gc_stack_bottom on its own.
+    """ Note: entrypoint should call llop.gc_stack_bottom on it's own.
+    That's necessary for making it work with asmgcc and hence JIT
 
-    If in doubt, use entrypoint_highlevel().
+    If in doubt, use entrypoint().
 
     if key == 'main' than it's included by default
     """
@@ -43,25 +43,14 @@ def entrypoint_lowlevel(key, argtypes, c_name=None, relax=False):
 
 pypy_debug_catch_fatal_exception = rffi.llexternal('pypy_debug_catch_fatal_exception', [], lltype.Void)
 
-def entrypoint_highlevel(key, argtypes, c_name=None):
-    """
-    Export the decorated Python function as C, under the name 'c_name'.
-
-    The function is wrapped inside a function that does the necessary
-    GIL-acquiring and GC-root-stack-bottom-ing.
-
-    If key == 'main' then it's included by default; otherwise you need
-    to list the key in the config's secondaryentrypoints (or give it
-    on the command-line with --entrypoints when translating).
+def entrypoint(key, argtypes, c_name=None):
+    """if key == 'main' than it's included by default
     """
     def deco(func):
         source = py.code.Source("""
-        from rpython.rlib import rgil
-
         def wrapper(%(args)s):
-            # acquire the GIL
-            rgil.acquire()
-            #
+            # the tuple has to be killed, but it's fine because this is
+            # called from C
             rffi.stackcounter.stacks_counter += 1
             llop.gc_stack_bottom(lltype.Void)   # marker for trackgcroot.py
             # this should not raise
@@ -78,9 +67,6 @@ def entrypoint_highlevel(key, argtypes, c_name=None):
                     llop.debug_fatalerror(lltype.Void, "error in c callback")
                     assert 0 # dead code
             rffi.stackcounter.stacks_counter -= 1
-            # release the GIL
-            rgil.release()
-            #
             return res
         """ % {'args': ', '.join(['arg%d' % i for i in range(len(argtypes))])})
         d = {'rffi': rffi, 'lltype': lltype,
@@ -93,19 +79,20 @@ def entrypoint_highlevel(key, argtypes, c_name=None):
         if c_name is not None:
             wrapper.c_name = c_name
         export_symbol(wrapper)
-        #
-        # the return value of the decorator is *the original function*,
-        # so that it can be called from Python too.  The wrapper is only
-        # registered in secondary_entrypoints where genc finds it.
-        func.exported_wrapper = wrapper
-        return func
+        return wrapper
     return deco
 
+entrypoint_highlevel = entrypoint
 
-def entrypoint(*args, **kwds):
-    raise Exception("entrypoint.entrypoint() is removed because of a bug.  "
-                    "Remove the 'aroundstate' code in your functions and "
-                    "then call entrypoint_highlevel(), which does that for "
-                    "you.  Another difference is that entrypoint_highlevel() "
-                    "returns the normal Python function, which can be safely "
-                    "called from more Python code.")
+# the point of dance below is so the call to rpython_startup_code actually
+# does call asm_stack_bottom. It's here because there is no other good place.
+# This thing is imported by any target which has any API, so it'll get
+# registered
+
+RPython_StartupCode = rffi.llexternal('RPython_StartupCode', [], lltype.Void,
+                                      _nowrapper=True,
+                                      random_effects_on_gcobjs=True)
+
+@entrypoint('main', [], c_name='rpython_startup_code')
+def rpython_startup_code():
+    RPython_StartupCode()

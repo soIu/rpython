@@ -80,10 +80,13 @@ def compile(f, gc, **kwds):
     from rpython.annotator.listdef import s_list_of_strings
     from rpython.translator.translator import TranslationContext
     from rpython.jit.metainterp.warmspot import apply_jit
+    from rpython.translator.platform import platform, is_host_build
     from rpython.translator.c import genc
     #
     t = TranslationContext()
     t.config.translation.gc = gc
+    if not is_host_build():
+        t.platform = platform
     if gc != 'boehm':
         t.config.translation.gcremovetypeptr = True
     for name, value in kwds.items():
@@ -167,7 +170,7 @@ class BaseFrameworkTests(object):
             funcs[num][2](n, x, x0, x1, x2, x3, x4, x5, x6, x7, l, s)
         myjitdriver = JitDriver(greens = ['num'],
                                 reds = ['n', 'x', 'x0', 'x1', 'x2', 'x3', 'x4',
-                                        'x5', 'x6', 'x7', 'l', 's'], is_recursive=True)
+                                        'x5', 'x6', 'x7', 'l', 's'])
         cls.main_allfuncs = staticmethod(main_allfuncs)
         cls.name_to_func = name_to_func
         OLD_DEBUG = GcLLDescr_framework.DEBUG
@@ -176,7 +179,7 @@ class BaseFrameworkTests(object):
             cls.cbuilder = compile(get_entry(allfuncs), cls.gc,
                                    gcrootfinder=cls.gcrootfinder, jit=True,
                                    thread=True)
-        except ConfigError as e:        
+        except ConfigError, e:        
             assert str(e).startswith('invalid value asmgcc')
             py.test.skip('asmgcc not supported')
         finally:
@@ -768,7 +771,7 @@ class CompileFrameworkTests(BaseFrameworkTests):
     def define_compile_framework_call_assembler(self):
         S = lltype.GcForwardReference()
         S.become(lltype.GcStruct('S', ('s', lltype.Ptr(S))))
-        driver = JitDriver(greens = [], reds = 'auto', is_recursive=True)
+        driver = JitDriver(greens = [], reds = 'auto')
 
         def f(n, x, x0, x1, x2, x3, x4, x5, x6, x7, l, s0):
             driver.jit_merge_point()

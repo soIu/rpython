@@ -34,7 +34,7 @@ class Netbsd(posix.BasePosix):
             cc = get_env("CC", "gcc")
         super(Netbsd, self).__init__(cc)
 
-    def _args_for_shared(self, args, **kwds):
+    def _args_for_shared(self, args):
         return ['-shared'] + args
 
     def _preprocess_include_dirs(self, include_dirs):

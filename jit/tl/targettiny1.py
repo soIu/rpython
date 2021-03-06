@@ -1,6 +1,5 @@
-from rpython.annotator.policy import AnnotatorPolicy
 from rpython.jit.tl import tiny1
-from rpython.jit.backend.hlinfo import highleveljitinfo
+from rpython.jit.codegen.hlinfo import highleveljitinfo
 
 
 def entry_point(args):
@@ -22,3 +21,18 @@ def entry_point(args):
 
 def target(driver, args):
     return entry_point, None
+
+# ____________________________________________________________
+
+from rpython.jit.hintannotator.policy import HintAnnotatorPolicy
+
+class MyHintAnnotatorPolicy(HintAnnotatorPolicy):
+    novirtualcontainer = True
+    oopspec = True
+
+def portal(driver):
+    """Return the 'portal' function, and the hint-annotator policy.
+    The portal is the function that gets patched with a call to the JIT
+    compiler.
+    """
+    return tiny1.ll_plus_minus, MyHintAnnotatorPolicy()

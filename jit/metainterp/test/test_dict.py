@@ -99,9 +99,9 @@ class DictTests:
             py.test.skip("this is an r_dict test")
         myjitdriver = JitDriver(greens = [], reds = ['total', 'dct'])
         def key(x):
-            return x & 1
+            return x % 2
         def eq(x, y):
-            return (x & 1) == (y & 1)
+            return (x % 2) == (y % 2)
 
         def f(n):
             dct = objectmodel.r_dict(eq, key)
@@ -117,7 +117,7 @@ class DictTests:
         res1 = f(100)
         res2 = self.meta_interp(f, [100], listops=True)
         assert res1 == res2
-        self.check_resops(int_and=2) # the hash was traced and eq, but cached
+        self.check_resops(int_mod=2) # the hash was traced and eq, but cached
 
     def test_dict_setdefault(self):
         myjitdriver = JitDriver(greens = [], reds = ['total', 'dct'])
@@ -140,9 +140,9 @@ class DictTests:
             py.test.skip("this is an r_dict test")
         myjitdriver = JitDriver(greens = [], reds = ['total', 'dct'])
         def key(x):
-            return x & 1
+            return x % 2
         def eq(x, y):
-            return (x & 1) == (y & 1)
+            return (x % 2) == (y % 2)
 
         def f(n):
             dct = objectmodel.r_dict(eq, key)
@@ -156,7 +156,7 @@ class DictTests:
         assert f(100) == 50
         res = self.meta_interp(f, [100], listops=True)
         assert res == 50
-        self.check_resops(int_and=2) # key + eq, but cached
+        self.check_resops(int_mod=2) # key + eq, but cached
 
     def test_repeated_lookup(self):
         if type(self.newdict()) is not dict:
@@ -190,14 +190,12 @@ class DictTests:
         # not cached anyway.
         res = self.meta_interp(f, [100], listops=True)
         assert res == f(50)
-        self.check_resops({'new_array_clear': 2, 'getfield_gc_r': 2,
+        self.check_resops({'new_array_clear': 2, 'getfield_gc': 2,
                            'guard_true': 4, 'jump': 1,
-                           'new_with_vtable': 2, 'getinteriorfield_gc_i': 2,
+                           'new_with_vtable': 2, 'getinteriorfield_gc': 2,
                            'setfield_gc': 14, 'int_gt': 2, 'int_sub': 2,
-                           'call_i': 4, 'call_n': 2, 'call_r': 2, 'int_ge': 2,
-                           'cond_call_value_i': 2, 'strhash': 4,
-                           'guard_no_exception': 8, 'new': 2,
-                           'guard_nonnull': 2})
+                           'call': 10, 'int_ge': 2,
+                           'guard_no_exception': 8, 'new': 2})
 
     def test_unrolling_of_dict_iter(self):
         driver = JitDriver(greens = [], reds = ['n'])
@@ -232,7 +230,7 @@ class DictTests:
 
         self.meta_interp(f, [10])
         # XXX should be one getinteriorfield_gc.  At least it's one call.
-        self.check_simple_loop(call_i=1, getinteriorfield_gc_i=2,
+        self.check_simple_loop(call=1, getinteriorfield_gc=2,
                                guard_no_exception=1)
 
     def test_ordered_dict_two_lookups(self):
@@ -253,7 +251,7 @@ class DictTests:
 
         self.meta_interp(f, [10])
         # XXX should be one getinteriorfield_gc.  At least it's one call.
-        self.check_simple_loop(call_i=1, getinteriorfield_gc_i=2,
+        self.check_simple_loop(call=1, getinteriorfield_gc=2,
                                guard_no_exception=1)
 
     def test_dict_insert_invalidates_caches(self):
@@ -274,7 +272,7 @@ class DictTests:
 
         res = self.meta_interp(f, [10])
         assert res == f(10)
-        self.check_simple_loop(call_i=3, cond_call_value_i=1, call_n=1)
+        self.check_simple_loop(call=5)
 
     def test_dict_array_write_invalidates_caches(self):
         driver = JitDriver(greens = [], reds = 'auto')
@@ -296,7 +294,7 @@ class DictTests:
         exp = f(10)
         res = self.meta_interp(f, [10])
         assert res == exp
-        self.check_simple_loop(call_i=4, cond_call_value_i=1, call_n=2)
+        self.check_simple_loop(call=7)
 
     def test_dict_double_lookup_2(self):
         driver = JitDriver(greens = [], reds = 'auto')
@@ -315,7 +313,7 @@ class DictTests:
 
         res = self.meta_interp(f, [10])
         assert res == f(10)
-        self.check_simple_loop(call_i=1, cond_call_value_i=1, call_n=1)
+        self.check_simple_loop(call=3)
 
     def test_dict_eq_can_release_gil(self):
         from rpython.rtyper.lltypesystem import lltype, rffi
@@ -347,9 +345,8 @@ class DictTests:
 
         res = self.meta_interp(f, [10], listops=True)
         assert res == 2 + 1 + 1 + 1
-        self.check_simple_loop(call_may_force_i=4,
-                              # ll_dict_lookup_trampoline
-                              call_n=1) # ll_dict_setitem_lookup_done_trampoline
+        self.check_simple_loop(call_may_force=4,    # ll_dict_lookup_trampoline
+                               call=1) # ll_dict_setitem_lookup_done_trampoline
 
     def test_bug42(self):
         myjitdriver = JitDriver(greens = [], reds = 'auto')
@@ -364,7 +361,7 @@ class DictTests:
                     if n in mdict:
                         raise Exception
         self.meta_interp(f, [10])
-        self.check_simple_loop(call_may_force_i=0, call_i=2, call_n=1)
+        self.check_simple_loop(call_may_force=0, call=4)
 
     def test_dict_virtual(self):
         myjitdriver = JitDriver(greens = [], reds = 'auto')
@@ -372,14 +369,14 @@ class DictTests:
             d = {}
             while n > 0:
                 myjitdriver.jit_merge_point()
-                if n & 7 == 0:
+                if n % 10 == 0:
                     n -= len(d)
                 d = {}
                 d["a"] = n
                 n -= 1
             return len(d)
         self.meta_interp(f, [100])
-        self.check_simple_loop(call_may_force_i=0, call_i=0, new=0)
+        self.check_simple_loop(call_may_force=0, call=0, new=0)
 
 
 class TestLLtype(DictTests, LLJitMixin):

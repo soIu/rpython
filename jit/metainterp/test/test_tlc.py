@@ -1,4 +1,5 @@
 import py
+from rpython.rtyper.module.support import LLSupport
 
 from rpython.jit.tl import tlc
 

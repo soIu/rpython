@@ -76,9 +76,7 @@ def trie_lookup(name):
     charnode = 0
     while 0 <= charnode < 0xffff: # 16bit number, 0xffff = None
         charnode *= 3
-        leftright = _charnodes[charnode]
-        parentstr = _charnodes[charnode + 1]
-        codepoint = _charnodes[charnode + 2]
+        leftright, parentstr, codepoint = _charnodes[charnode:charnode+3]
 
         if leftright < 0:
             # XXX assumes msb is sign
@@ -93,7 +91,7 @@ def trie_lookup(name):
         else:
             parent = (parentstr & 0x7fffffff) >> %(STRIDXBITS)d
         stridx = parentstr & ((1 << %(STRIDXBITS)d) - 1)
-
+        
         strlen = ord(_stringtable[stridx])
         substring = _stringtable[stridx+1:stridx+1+strlen]
 
@@ -111,9 +109,7 @@ def name_of_node(charnode):
     prevnode = -1
     while 0 <= charnode < 0xffff: # 16bit number, 0xffff = None
         charnode *= 3
-        leftright = _charnodes[charnode]
-        parentstr = _charnodes[charnode + 1]
-        codepoint = _charnodes[charnode + 2]
+        leftright, parentstr, codepoint = _charnodes[charnode:charnode+3]
 
         if leftright < 0:
             # XXX assumes msg is sign
@@ -132,14 +128,13 @@ def name_of_node(charnode):
             stridx = parentstr & ((1<<%(STRIDXBITS)d)-1)
             strlen = ord(_stringtable[stridx])
             substring = _stringtable[stridx+1:stridx+1+strlen]
-            res.append(substring)
+            res.insert(0, substring)
 
         prevnode = charnode // 3
         charnode = parent
 
-    res.reverse()
     return ''.join(res)
-
+    
 """ % globals()
 
 def findranges(d):
@@ -170,11 +165,6 @@ def collapse_ranges(ranges):
     return collapsed
 
 def build_compression_tree(outfile, ucdata):
-    print >> outfile, "#" + "_" * 60
-    print >> outfile, "# output from build_compression_tree"
-    if not ucdata:
-        print >> outfile, empty_trie_functions
-        return
     print >> outfile, classdef
 
     reversedict = {}
@@ -190,7 +180,7 @@ def build_compression_tree(outfile, ucdata):
         print >> outfile, "%r" % (chr(strlen) + string)
         stringidx[string] = stridx
         stridx += strlen + 1
-
+        
     print >> outfile, ")"
 
     assert stridx < (1<<STRIDXBITS), "Too many strings, > %d chars" % (
@@ -200,7 +190,7 @@ def build_compression_tree(outfile, ucdata):
     nodelist = []
     maxidx = 0
     nodes = [rootnode]
-
+    
     while nodes:
         n = nodes.pop()
         nodelist.append(n)
@@ -208,31 +198,28 @@ def build_compression_tree(outfile, ucdata):
             nodes.append(n.left)
         if n.right:
             nodes.append(n.right)
-
+        
     nodelist.sort(key=lambda x: x.index)
     newnodes = []
     map(newnodes.extend, (n.as_list(stringidx) for n in nodelist))
     print >> outfile, "_charnodes =",
     pprint.pprint(newnodes, stream=outfile)
-
+    
     function = ["def lookup_charcode(code):",
                 "    res = -1"]
     ranges = collapse_ranges(findranges(reversedict))
-    prefix = ""
     for low, high in ranges:
         if high - low <= MINLIST:
             for code in range(low, high + 1):
                 if code in reversedict:
                     function.append(
-                        "    %sif code == %d: res = %s" %
-                        (prefix, code, reversedict[code].index))
-                    prefix = "el"
+                        "    if code == %d: res = %s" %
+                        (code, reversedict[code].index))
             continue
 
         function.append(
-            "    %sif %d <= code <= %d: res = _charnames_%d[code-%d]" % (
-            prefix, low, high, low, low))
-        prefix = "el"
+            "    if %d <= code <= %d: res = _charnames_%d[code-%d]" % (
+            low, high, low, low))
 
         print >> outfile, "_charnames_%d = [" % (low,)
         for code in range(low, high + 1):
@@ -247,8 +234,6 @@ def build_compression_tree(outfile, ucdata):
                      "",
                      ])
     print >> outfile, '\n'.join(function)
-    print >> outfile, "# end output from build_compression_tree"
-    print >> outfile, "#" + "_" * 60
     return rootnode
 
 def gen_compression_tree(stringlist, ucdata, reversedict, parent=None, parent_str="", left=False):
@@ -259,8 +244,8 @@ def gen_compression_tree(stringlist, ucdata, reversedict, parent=None, parent_st
     for string in stringlist:
         for stop in range(1, len(string) + 1):
             codes[string[:stop]] = codes.get(string[:stop], 0) + 1
-
-    s = [((freq), code) for (code, freq) in codes.iteritems()]
+            
+    s = [((freq), code) for (code, freq) in codes.iteritems()]            
     s.sort()
     if not s:
         return None
@@ -321,10 +306,3 @@ if __name__ == '__main__':
     import sys
 
     build_compression_tree(sys.stdout, testdata)
-
-empty_trie_functions = """
-def trie_lookup(name):
-    raise KeyError
-def lookup_charcode(code):
-    raise KeyError
-"""

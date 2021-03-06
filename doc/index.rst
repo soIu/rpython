@@ -25,6 +25,7 @@ General
    architecture
    faq
 
+
 User Documentation
 ------------------
 
@@ -47,8 +48,6 @@ Writing your own interpreter in RPython
    rpython
    rlib
    rffi
-   examples
-   rstrategies
 
 
 RPython internals
@@ -61,7 +60,6 @@ RPython internals
    getting-started
    dir-reference
    jit/index
-   arch/index
    translation
    rtyper
    garbage_collection

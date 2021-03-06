@@ -28,7 +28,7 @@ class RecursiveTests:
                 return 1
         res = self.meta_interp(main, [20], enable_opts='')
         assert res == main(20)
-        self.check_history(call_i=0)
+        self.check_history(call=0)
 
     def test_simple_recursion_with_exc(self):
         myjitdriver = JitDriver(greens=[], reds=['n', 'm'])
@@ -144,10 +144,10 @@ class RecursiveTests:
         f = self.get_interpreter(codes)
 
         assert self.meta_interp(f, [0, 0, 0], enable_opts='') == 42
-        self.check_resops(call_may_force_i=1, int_add=1, call=0)
+        self.check_resops(call_may_force=1, int_add=1, call=0)
         assert self.meta_interp(f, [0, 0, 0], enable_opts='',
                                 inline=True) == 42
-        self.check_resops(call=0, int_add=2, call_may_force_i=0,
+        self.check_resops(call=0, int_add=2, call_may_force=0,
                           guard_no_exception=0)
 
     def test_inline_jitdriver_check(self):
@@ -490,7 +490,7 @@ class RecursiveTests:
             return loop(100)
 
         res = self.meta_interp(main, [0], enable_opts='', trace_limit=TRACE_LIMIT)
-        self.check_resops(call=0, call_may_force_i=1)
+        self.check_resops(call=0, call_may_force=1)
 
         res = self.meta_interp(main, [1], enable_opts='', trace_limit=TRACE_LIMIT)
         self.check_resops(call=0, call_may_force=0)
@@ -541,8 +541,7 @@ class RecursiveTests:
             code = hlstr(code)
             return "%s %d %s" % (code, pc, code[pc])
         myjitdriver = JitDriver(greens=['pc', 'code'], reds=['n'],
-                                get_printable_location=p,
-                                is_recursive=True)
+                                get_printable_location=p)
 
         def f(code, n):
             pc = 0
@@ -576,7 +575,7 @@ class RecursiveTests:
                 result += f('-c-----------l-', i+100)
         self.meta_interp(g, [10], backendopt=True)
         self.check_aborted_count(1)
-        self.check_resops(call=0, call_assembler_i=2)
+        self.check_resops(call=0, call_assembler=2)
         self.check_jitcell_token_count(2)
 
     def test_directly_call_assembler(self):
@@ -593,7 +592,7 @@ class RecursiveTests:
                 i += 1
 
         self.meta_interp(portal, [2], inline=True)
-        self.check_history(call_assembler_n=1)
+        self.check_history(call_assembler=1)
 
     def test_recursion_cant_call_assembler_directly(self):
         driver = JitDriver(greens = ['codeno'], reds = ['i', 'j'],
@@ -625,7 +624,7 @@ class RecursiveTests:
         try:
             compile.compile_tmp_callback = my_ctc
             self.meta_interp(portal, [2, 5], inline=True)
-            self.check_resops(call_may_force=0, call_assembler_n=2)
+            self.check_resops(call_may_force=0, call_assembler=2)
         finally:
             compile.compile_tmp_callback = original_ctc
         # check that we made a temporary callback
@@ -680,7 +679,7 @@ class RecursiveTests:
         try:
             compile.compile_tmp_callback = my_ctc
             self.meta_interp(main, [2, 5], inline=True)
-            self.check_resops(call_may_force=0, call_assembler_n=2)
+            self.check_resops(call_may_force=0, call_assembler=2)
         finally:
             compile.compile_tmp_callback = original_ctc
         # check that we made a temporary callback
@@ -710,7 +709,7 @@ class RecursiveTests:
             return k
 
         self.meta_interp(portal, [2], inline=True)
-        self.check_history(call_assembler_i=1)
+        self.check_history(call_assembler=1)
 
     def test_directly_call_assembler_raise(self):
 
@@ -729,14 +728,14 @@ class RecursiveTests:
                 if codeno == 2:
                     try:
                         portal(1)
-                    except MyException as me:
+                    except MyException, me:
                         i += me.x
                 i += 1
             if codeno == 1:
                 raise MyException(1)
 
         self.meta_interp(portal, [2], inline=True)
-        self.check_history(call_assembler_n=1)
+        self.check_history(call_assembler=1)
 
     def test_directly_call_assembler_fail_guard(self):
         driver = JitDriver(greens = ['codeno'], reds = ['i', 'k'],
@@ -1024,7 +1023,7 @@ class RecursiveTests:
         res = self.meta_interp(portal, [2, 0], inline=True,
                                policy=StopAtXPolicy(residual))
         assert res == portal(2, 0)
-        self.check_resops(call_assembler_i=4)
+        self.check_resops(call_assembler=4)
 
     def test_inline_without_hitting_the_loop(self):
         driver = JitDriver(greens = ['codeno'], reds = ['i'],
@@ -1074,7 +1073,7 @@ class RecursiveTests:
         assert portal(0, 1) == 2095
         res = self.meta_interp(portal, [0, 1], inline=True)
         assert res == 2095
-        self.check_resops(call_assembler_i=12)
+        self.check_resops(call_assembler=12)
 
     def test_inline_with_hitting_the_loop_sometimes_exc(self):
         driver = JitDriver(greens = ['codeno'], reds = ['i', 'k'],
@@ -1092,7 +1091,7 @@ class RecursiveTests:
                 if codeno < 10:
                     try:
                         portal(codeno + 5, k+1)
-                    except GotValue as e:
+                    except GotValue, e:
                         i += e.result
                     codeno += 1
                 elif codeno == 10:
@@ -1106,13 +1105,13 @@ class RecursiveTests:
         def main(codeno, k):
             try:
                 portal(codeno, k)
-            except GotValue as e:
+            except GotValue, e:
                 return e.result
 
         assert main(0, 1) == 2095
         res = self.meta_interp(main, [0, 1], inline=True)
         assert res == 2095
-        self.check_resops(call_assembler_n=12)
+        self.check_resops(call_assembler=12)
 
     def test_inline_recursion_limit(self):
         driver = JitDriver(greens = ["threshold", "loop"], reds=["i"])
@@ -1138,7 +1137,7 @@ class RecursiveTests:
         res1 = portal(10, True, 0)
         res2 = self.meta_interp(portal, [10, True, 0], inline=True)
         assert res1 == res2
-        self.check_resops(call_assembler_i=2)
+        self.check_resops(call_assembler=2)
 
         res1 = portal(9, True, 0)
         res2 = self.meta_interp(portal, [9, True, 0], inline=True)
@@ -1312,7 +1311,7 @@ class RecursiveTests:
                 return (code + 1) * 2
 
             driver = JitDriver(greens=["pc", "code"], reds='auto',
-                               get_unique_id=get_unique_id, is_recursive=True)
+                               get_unique_id=get_unique_id)
 
             def f(pc, code):
                 i = 0

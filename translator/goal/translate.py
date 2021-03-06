@@ -24,7 +24,7 @@ GOALS = [
     ("annotate", "do type inference", "-a --annotate", ""),
     ("rtype", "do rtyping", "-t --rtype", ""),
     ("pyjitpl", "JIT generation step", "--pyjitpl", ""),
-    ("jittest", "JIT test with llgraph backend", "--pyjittest", ""),
+    ("jittest", "JIT test with llgraph backend", "--jittest", ""),
     ("backendopt", "do backend optimizations", "--backendopt", ""),
     ("source", "create source", "-s --source", ""),
     ("compile", "compile", "-c --compile", " (default goal)"),
@@ -83,8 +83,9 @@ translate_optiondescr = OptionDescription("translate", "XXX", [
 ])
 
 import optparse
-from rpython.tool.ansi_print import AnsiLogger
-log = AnsiLogger("translation")
+from rpython.tool.ansi_print import ansi_log
+log = py.log.Producer("translation")
+py.log.setconsumer("translation", ansi_log)
 
 def load_target(targetspec):
     log.info("Translating target as defined by %s" % targetspec)
@@ -213,7 +214,6 @@ def log_config(config, header="config used"):
         log.WARNING(warning)
 
 def main():
-    sys.setrecursionlimit(2000)  # PyPy can't translate within cpython's 1k limit
     targetspec_dic, translateconfig, config, args = parse_options_and_load_target()
     from rpython.translator import translator
     from rpython.translator import driver

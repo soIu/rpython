@@ -30,14 +30,12 @@ generic element in some specific subset of the set of all objects.
 from __future__ import absolute_import
 
 import inspect
-import math
 import weakref
 from types import BuiltinFunctionType, MethodType
-from collections import OrderedDict, defaultdict
 
 import rpython
 from rpython.tool import descriptor
-from rpython.tool.pairtype import pair, extendabletype, doubledispatch
+from rpython.tool.pairtype import pair, extendabletype
 from rpython.rlib.rarithmetic import r_uint, base_int, r_singlefloat, r_longfloat
 
 
@@ -45,7 +43,6 @@ class State(object):
     # A global attribute :-(  Patch it with 'True' to enable checking of
     # the no_nul attribute...
     check_str_without_nul = False
-    allow_int_to_float = True
 TLS = State()
 
 class SomeObject(object):
@@ -95,9 +92,16 @@ class SomeObject(object):
         if self == other:
             return True
         try:
-            return union(self, other) == self
-        except UnionError:
-            return False
+            TLS.no_side_effects_in_union += 1
+        except AttributeError:
+            TLS.no_side_effects_in_union = 1
+        try:
+            try:
+                return pair(self, other).union() == self
+            except UnionError:
+                return False
+        finally:
+            TLS.no_side_effects_in_union -= 1
 
     def is_constant(self):
         d = self.__dict__
@@ -124,16 +128,6 @@ class SomeObject(object):
     def nonnoneify(self):
         return self
 
-@doubledispatch
-def intersection(s_obj1, s_obj2):
-    """Return the intersection of two annotations, or an over-approximation thereof"""
-    raise NotImplementedError
-
-@doubledispatch
-def difference(s_obj1, s_obj2):
-    """Return the set difference of two annotations, or an over-approximation thereof"""
-    raise NotImplementedError
-
 
 class SomeType(SomeObject):
     "Stands for a type.  We might not be sure which one it is."
@@ -142,23 +136,6 @@ class SomeType(SomeObject):
 
     def can_be_none(self):
         return False
-
-class SomeTypeOf(SomeType):
-    """The type of a variable"""
-    def __init__(self, args_v):
-        self.is_type_of = args_v
-
-def typeof(args_v):
-    if args_v:
-        result = SomeTypeOf(args_v)
-        if len(args_v) == 1:
-            s_arg = args_v[0].annotation
-            if isinstance(s_arg, SomeException) and len(s_arg.classdefs) == 1:
-                cdef, = s_arg.classdefs
-                result.const = cdef.classdesc.pyobj
-        return result
-    else:
-        return SomeType()
 
 
 class SomeFloat(SomeObject):
@@ -170,12 +147,13 @@ class SomeFloat(SomeObject):
     def __eq__(self, other):
         if (type(self) is SomeFloat and type(other) is SomeFloat and
             self.is_constant() and other.is_constant()):
+            from rpython.rlib.rfloat import isnan, copysign
             # NaN unpleasantness.
-            if math.isnan(self.const) and math.isnan(other.const):
+            if isnan(self.const) and isnan(other.const):
                 return True
             # 0.0 vs -0.0 unpleasantness.
             if not self.const and not other.const:
-                return math.copysign(1., self.const) == math.copysign(1., other.const)
+                return copysign(1., self.const) == copysign(1., other.const)
             #
         return super(SomeFloat, self).__eq__(other)
 
@@ -235,9 +213,6 @@ class SomeBool(SomeInteger):
 
     def set_knowntypedata(self, knowntypedata):
         assert not hasattr(self, 'knowntypedata')
-        for key, value in knowntypedata.items():
-            if not value:
-                del knowntypedata[key]
         if knowntypedata:
             self.knowntypedata = knowntypedata
 
@@ -402,7 +377,11 @@ class SomeDict(SomeObject):
         return type(self)(self.dictdef)
 
 class SomeOrderedDict(SomeDict):
-    knowntype = OrderedDict
+    try:
+        from collections import OrderedDict as knowntype
+    except ImportError:    # Python 2.6
+        class PseudoOrderedDict(dict): pass
+        knowntype = PseudoOrderedDict
 
     def method_copy(dct):
         return SomeOrderedDict(dct.dictdef)
@@ -433,7 +412,7 @@ class SomeInstance(SomeObject):
 
     def __init__(self, classdef, can_be_None=False, flags={}):
         self.classdef = classdef
-        self.knowntype = classdef.classdesc if classdef else None
+        self.knowntype = classdef or object
         self.can_be_None = can_be_None
         self.flags = flags
 
@@ -461,55 +440,6 @@ class SomeInstance(SomeObject):
     def noneify(self):
         return SomeInstance(self.classdef, can_be_None=True)
 
-@intersection.register(SomeInstance, SomeInstance)
-def intersection_Instance(s_inst1, s_inst2):
-    can_be_None = s_inst1.can_be_None and s_inst2.can_be_None
-    if s_inst1.classdef.issubclass(s_inst2.classdef):
-        return SomeInstance(s_inst1.classdef, can_be_None=can_be_None)
-    elif s_inst2.classdef.issubclass(s_inst1.classdef):
-        return SomeInstance(s_inst2.classdef, can_be_None=can_be_None)
-    else:
-        return s_ImpossibleValue
-
-@difference.register(SomeInstance, SomeInstance)
-def difference_Instance_Instance(s_inst1, s_inst2):
-    if s_inst1.classdef.issubclass(s_inst2.classdef):
-        return s_ImpossibleValue
-    else:
-        return s_inst1
-
-
-class SomeException(SomeObject):
-    """The set of exceptions obeying type(exc) in self.classes"""
-    def __init__(self, classdefs):
-        self.classdefs = classdefs
-
-    def can_be_none(self):
-        return False
-
-    def as_SomeInstance(self):
-        return unionof(*[SomeInstance(cdef) for cdef in self.classdefs])
-
-@intersection.register(SomeException, SomeInstance)
-def intersection_Exception_Instance(s_exc, s_inst):
-    classdefs = {c for c in s_exc.classdefs if c.issubclass(s_inst.classdef)}
-    if classdefs:
-        return SomeException(classdefs)
-    else:
-        return s_ImpossibleValue
-
-@intersection.register(SomeInstance, SomeException)
-def intersection_Exception_Instance(s_inst, s_exc):
-    return intersection(s_exc, s_inst)
-
-@difference.register(SomeException, SomeInstance)
-def difference_Exception_Instance(s_exc, s_inst):
-    classdefs = {c for c in s_exc.classdefs
-        if not c.issubclass(s_inst.classdef)}
-    if classdefs:
-        return SomeException(classdefs)
-    else:
-        return s_ImpossibleValue
 
 class SomePBC(SomeObject):
     """Stands for a global user instance, built prior to the analysis,
@@ -536,7 +466,7 @@ class SomePBC(SomeObject):
             if desc.pyobj is not None:
                 self.const = desc.pyobj
         elif len(descriptions) > 1:
-            from rpython.annotator.classdesc import ClassDesc
+            from rpython.annotator.description import ClassDesc
             if self.getKind() is ClassDesc:
                 # a PBC of several classes: enforce them all to be
                 # built, without support for specialization.  See
@@ -676,10 +606,6 @@ class SomeProperty(SomeObject):
 
 s_None = SomeNone()
 s_Bool = SomeBool()
-s_True = SomeBool()
-s_True.const = True
-s_False = SomeBool()
-s_False.const = False
 s_Int = SomeInteger()
 s_ImpossibleValue = SomeImpossibleValue()
 s_Str0 = SomeString(no_nul=True)
@@ -739,27 +665,6 @@ class UnionError(AnnotatorError):
     def __repr__(self):
         return str(self)
 
-def union(s1, s2):
-    """The join operation in the lattice of annotations.
-
-    It is the most precise SomeObject instance that contains both arguments.
-
-    union() is (supposed to be) idempotent, commutative, associative and has
-    no side-effects.
-    """
-    try:
-        TLS.no_side_effects_in_union += 1
-    except AttributeError:
-        TLS.no_side_effects_in_union = 1
-    try:
-        if s1 == s2:
-            # Most pair(...).union() methods deal incorrectly with that case
-            # when constants are involved.
-            return s1
-        return pair(s1, s2).union()
-    finally:
-        TLS.no_side_effects_in_union -= 1
-
 def unionof(*somevalues):
     "The most precise SomeValue instance that contains all the values."
     try:
@@ -770,7 +675,7 @@ def unionof(*somevalues):
             if s1 != s2:
                 s1 = pair(s1, s2).union()
     else:
-        # See comment in union() above
+        # this is just a performance shortcut
         if s1 != s2:
             s1 = pair(s1, s2).union()
     return s1
@@ -780,15 +685,14 @@ def unionof(*somevalues):
 
 def add_knowntypedata(ktd, truth, vars, s_obj):
     for v in vars:
-        ktd[truth][v] = s_obj
+        ktd[(truth, v)] = s_obj
 
 
 def merge_knowntypedata(ktd1, ktd2):
-    r = defaultdict(dict)
-    for truth, constraints in ktd1.items():
-        for v in constraints:
-            if truth in ktd2 and v in ktd2[truth]:
-                r[truth][v] = unionof(ktd1[truth][v], ktd2[truth][v])
+    r = {}
+    for truth_v in ktd1:
+        if truth_v in ktd2:
+            r[truth_v] = unionof(ktd1[truth_v], ktd2[truth_v])
     return r
 
 

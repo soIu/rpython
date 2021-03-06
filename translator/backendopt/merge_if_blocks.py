@@ -1,8 +1,7 @@
 from rpython.flowspace.model import Constant, Variable, mkentrymap
-from rpython.tool.ansi_print import AnsiLogger
+from rpython.translator.backendopt.support import log
 
-log = AnsiLogger("backendopt")
-
+log = log.mergeifblocks
 
 def is_chain_block(block, first=False):
     if len(block.operations) == 0:
@@ -19,14 +18,6 @@ def is_chain_block(block, first=False):
     if isinstance(op.args[0], Variable) and isinstance(op.args[1], Variable):
         return False
     if isinstance(op.args[0], Constant) and isinstance(op.args[1], Constant):
-        return False
-    # check that the constant is hashable (ie not a symbolic)
-    try:
-        if isinstance(op.args[0], Constant):
-            hash(op.args[0].value)
-        else:
-            hash(op.args[1].value)
-    except TypeError:
         return False
     return True
 

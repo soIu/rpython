@@ -35,7 +35,6 @@ constantnames = '''
     MAX_WBITS  MAX_MEM_LEVEL
     Z_BEST_SPEED  Z_BEST_COMPRESSION  Z_DEFAULT_COMPRESSION
     Z_FILTERED  Z_HUFFMAN_ONLY  Z_DEFAULT_STRATEGY Z_NEED_DICT
-    Z_NULL
     '''.split()
 
 class SimpleCConfig:
@@ -52,7 +51,6 @@ class SimpleCConfig:
     voidpf = rffi_platform.SimpleType('voidpf', rffi.VOIDP)
 
     ZLIB_VERSION = rffi_platform.DefinedConstantString('ZLIB_VERSION')
-    ZLIB_VERNUM = rffi_platform.DefinedConstantInteger('ZLIB_VERNUM')
 
 for _name in constantnames:
     setattr(SimpleCConfig, _name, rffi_platform.ConstantInteger(_name))
@@ -65,7 +63,6 @@ Bytef = config['Bytef']
 Bytefp = lltype.Ptr(lltype.Array(Bytef, hints={'nolength': True}))
 
 ZLIB_VERSION = config['ZLIB_VERSION']
-ZLIB_VERNUM = config['ZLIB_VERNUM']
 
 for _name in constantnames:
     globals()[_name] = config[_name]
@@ -79,10 +76,6 @@ else:
     DEF_MEM_LEVEL = MAX_MEM_LEVEL
 
 OUTPUT_BUFFER_SIZE = 32*1024
-INPUT_BUFFER_MAX = 2047*1024*1024
-# Note: we assume that zlib never outputs less than OUTPUT_BUFFER_SIZE
-# from an input of INPUT_BUFFER_MAX bytes.  This should be true by a
-# large margin (I think zlib never compresses by more than ~1000x).
 
 
 class ComplexCConfig:
@@ -142,7 +135,6 @@ _deflateInit2_ = zlib_external(
     rffi.INT)
 _deflate = zlib_external('deflate', [z_stream_p, rffi.INT], rffi.INT)
 
-_deflateCopy = zlib_external('deflateCopy', [z_stream_p, z_stream_p], rffi.INT)
 _deflateEnd = zlib_external('deflateEnd', [z_stream_p], rffi.INT,
                             releasegil=False)
 
@@ -162,7 +154,6 @@ _inflateInit2_ = zlib_external(
     rffi.INT)
 _inflate = zlib_external('inflate', [z_stream_p, rffi.INT], rffi.INT)
 
-_inflateCopy = zlib_external('inflateCopy', [z_stream_p, z_stream_p], rffi.INT)
 _inflateEnd = zlib_external('inflateEnd', [z_stream_p], rffi.INT,
                             releasegil=False)
 
@@ -177,18 +168,6 @@ _zlibVersion = zlib_external('zlibVersion', [], rffi.CCHARP)
 
 # ____________________________________________________________
 
-def _crc_or_adler(string, start, function):
-    with rffi.scoped_nonmovingbuffer(string) as bytes:
-        remaining = len(string)
-        checksum = start
-        ptr = rffi.cast(Bytefp, bytes)
-        while remaining > 0:
-            count = min(remaining, 32*1024*1024)
-            checksum = function(checksum, ptr, count)
-            ptr = rffi.ptradd(ptr, count)
-            remaining -= count
-    return checksum
-
 CRC32_DEFAULT_START = 0
 
 def crc32(string, start=CRC32_DEFAULT_START):
@@ -196,17 +175,12 @@ def crc32(string, start=CRC32_DEFAULT_START):
     Compute the CRC32 checksum of the string, possibly with the given
     start value, and return it as a unsigned 32 bit integer.
     """
-    return _crc_or_adler(string, start, _crc32)
+    with rffi.scoped_nonmovingbuffer(string) as bytes:
+        checksum = _crc32(start, rffi.cast(Bytefp, bytes), len(string))
+    return checksum
+
 
 ADLER32_DEFAULT_START = 1
-
-def adler32(string, start=ADLER32_DEFAULT_START):
-    """
-    Compute the Adler-32 checksum of the string, possibly with the given
-    start value, and return it as a unsigned 32 bit integer.
-    """
-    return _crc_or_adler(string, start, _adler32)
-
 
 def deflateSetDictionary(stream, string):
     with rffi.scoped_nonmovingbuffer(string) as buf:
@@ -221,6 +195,16 @@ def inflateSetDictionary(stream, string):
         raise RZlibError("Parameter is invalid or the stream state is inconsistent")
     elif err == Z_DATA_ERROR:
         raise RZlibError("The given dictionary doesn't match the expected one")
+
+    
+def adler32(string, start=ADLER32_DEFAULT_START):
+    """
+    Compute the Adler-32 checksum of the string, possibly with the given
+    start value, and return it as a unsigned 32 bit integer.
+    """
+    with rffi.scoped_nonmovingbuffer(string) as bytes:
+        checksum = _adler32(start, rffi.cast(Bytefp, bytes), len(string))
+    return checksum
 
 def zlibVersion():
     """Return the runtime version of zlib library"""
@@ -266,7 +250,7 @@ null_stream = lltype.nullptr(z_stream)
 
 def deflateInit(level=Z_DEFAULT_COMPRESSION, method=Z_DEFLATED,
                 wbits=MAX_WBITS, memLevel=DEF_MEM_LEVEL,
-                strategy=Z_DEFAULT_STRATEGY, zdict=None):
+                strategy=Z_DEFAULT_STRATEGY):
     """
     Allocate and return an opaque 'stream' object that can be used to
     compress data.
@@ -275,12 +259,6 @@ def deflateInit(level=Z_DEFAULT_COMPRESSION, method=Z_DEFLATED,
     rgc.add_memory_pressure(rffi.sizeof(z_stream))
     err = _deflateInit2(stream, level, method, wbits, memLevel, strategy)
     if err == Z_OK:
-        if zdict is not None:
-            try:
-                deflateSetDictionary(stream, zdict)
-            except:
-                lltype.free(stream, flavor='raw')
-                raise
         return stream
     else:
         try:
@@ -293,19 +271,6 @@ def deflateInit(level=Z_DEFAULT_COMPRESSION, method=Z_DEFLATED,
             lltype.free(stream, flavor='raw')
 
 
-def deflateCopy(source):
-    """
-    Allocate and return an independent copy of the provided stream object.
-    """
-    dest = deflateInit()
-    err = _deflateCopy(dest, source)
-    if err != Z_OK:
-        deflateEnd(dest)
-        raise RZlibError.fromstream(source, err,
-            "while copying compression object")
-    return dest
-
-
 def deflateEnd(stream):
     """
     Free the resources associated with the deflate stream.
@@ -314,7 +279,7 @@ def deflateEnd(stream):
     lltype.free(stream, flavor='raw')
 
 
-def inflateInit(wbits=MAX_WBITS, zdict=None):
+def inflateInit(wbits=MAX_WBITS):
     """
     Allocate and return an opaque 'stream' object that can be used to
     decompress data.
@@ -323,17 +288,6 @@ def inflateInit(wbits=MAX_WBITS, zdict=None):
     rgc.add_memory_pressure(rffi.sizeof(z_stream))
     err = _inflateInit2(stream, wbits)
     if err == Z_OK:
-        if zdict is not None and wbits < 0:
-            try:
-                if ZLIB_VERNUM is None or ZLIB_VERNUM < 0x1221:
-                    raise RZlibError("zlib version %s does not allow raw "
-                                     "inflate with dictionary" %
-                                       ZLIB_VERSION if ZLIB_VERSION is not None
-                                       else "<unknown>")
-                inflateSetDictionary(stream, zdict)
-            except:
-                lltype.free(stream, flavor='raw')
-                raise
         return stream
     else:
         try:
@@ -344,19 +298,6 @@ def inflateInit(wbits=MAX_WBITS, zdict=None):
                     "while creating decompression object")
         finally:
             lltype.free(stream, flavor='raw')
-
-
-def inflateCopy(source):
-    """
-    Allocate and return an independent copy of the provided stream object.
-    """
-    dest = inflateInit()
-    err = _inflateCopy(dest, source)
-    if err != Z_OK:
-        inflateEnd(dest)
-        raise RZlibError.fromstream(source, err,
-            "while copying decompression object")
-    return dest
 
 
 def inflateEnd(stream):
@@ -383,8 +324,7 @@ def compress(stream, data, flush=Z_NO_FLUSH):
     return data
 
 
-def decompress(stream, data, flush=Z_SYNC_FLUSH, max_length=sys.maxint,
-               zdict=None):
+def decompress(stream, data, flush=Z_SYNC_FLUSH, max_length=sys.maxint):
     """
     Feed more data into an inflate stream.  Returns a tuple (string,
     finished, unused_data_length).  The string contains (a part of) the
@@ -410,7 +350,7 @@ def decompress(stream, data, flush=Z_SYNC_FLUSH, max_length=sys.maxint,
         should_finish = False
     while_doing = "while decompressing data"
     data, err, avail_in = _operate(stream, data, flush, max_length, _inflate,
-                                   while_doing, zdict=zdict)
+                                   while_doing)
     if should_finish:
         # detect incomplete input
         rffi.setintfield(stream, 'c_avail_in', 0)
@@ -421,14 +361,14 @@ def decompress(stream, data, flush=Z_SYNC_FLUSH, max_length=sys.maxint,
     return data, finished, avail_in
 
 
-def _operate(stream, data, flush, max_length, cfunc, while_doing, zdict=None):
+def _operate(stream, data, flush, max_length, cfunc, while_doing):
     """Common code for compress() and decompress().
     """
     # Prepare the input buffer for the stream
-    assert data is not None
+    assert data is not None # XXX seems to be sane assumption, however not for sure
     with rffi.scoped_nonmovingbuffer(data) as inbuf:
         stream.c_next_in = rffi.cast(Bytefp, inbuf)
-        end_inbuf = rffi.ptradd(stream.c_next_in, len(data))
+        rffi.setintfield(stream, 'c_avail_in', len(data))
 
         # Prepare the output buffer
         with lltype.scoped_alloc(rffi.CCHARP.TO, OUTPUT_BUFFER_SIZE) as outbuf:
@@ -438,11 +378,6 @@ def _operate(stream, data, flush, max_length, cfunc, while_doing, zdict=None):
             result = StringBuilder()
 
             while True:
-                avail_in = ptrdiff(end_inbuf, stream.c_next_in)
-                if avail_in > INPUT_BUFFER_MAX:
-                    avail_in = INPUT_BUFFER_MAX
-                rffi.setintfield(stream, 'c_avail_in', avail_in)
-
                 stream.c_next_out = rffi.cast(Bytefp, outbuf)
                 bufsize = OUTPUT_BUFFER_SIZE
                 if max_length < bufsize:
@@ -452,13 +387,7 @@ def _operate(stream, data, flush, max_length, cfunc, while_doing, zdict=None):
                     bufsize = max_length
                 max_length -= bufsize
                 rffi.setintfield(stream, 'c_avail_out', bufsize)
-
                 err = cfunc(stream, flush)
-
-                if err == Z_NEED_DICT and zdict is not None:
-                    inflateSetDictionary(stream, zdict)
-                    # repeat the call to inflate
-                    err = cfunc(stream, flush)
                 if err == Z_OK or err == Z_STREAM_END:
                     # accumulate data into 'result'
                     avail_out = rffi.cast(lltype.Signed, stream.c_avail_out)
@@ -488,9 +417,6 @@ def _operate(stream, data, flush, max_length, cfunc, while_doing, zdict=None):
     # When decompressing, if the compressed stream of data was truncated,
     # then the zlib simply returns Z_OK and waits for more.  If it is
     # complete it returns Z_STREAM_END.
-    avail_in = ptrdiff(end_inbuf, stream.c_next_in)
-    return (result.build(), err, avail_in)
-
-def ptrdiff(p, q):
-    x = rffi.cast(lltype.Unsigned, p) - rffi.cast(lltype.Unsigned, q)
-    return rffi.cast(lltype.Signed, x)
+    return (result.build(),
+            err,
+            rffi.cast(lltype.Signed, stream.c_avail_in))

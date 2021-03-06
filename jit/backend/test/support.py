@@ -7,6 +7,7 @@ from rpython.rlib.rarithmetic import is_valid_int
 
 class BaseCompiledMixin(object):
 
+    type_system = None
     CPUClass = None
     basic = False
 
@@ -28,6 +29,7 @@ class BaseCompiledMixin(object):
 
         self.pre_translation_hook()
         t = self._get_TranslationContext()
+        t.config.translation.type_system = self.type_system # force typesystem-specific options
         if listcomp:
             t.config.translation.list_comprehension_operations = True
 
@@ -109,6 +111,7 @@ class BaseCompiledMixin(object):
 
 
 class CCompiledMixin(BaseCompiledMixin):
+    type_system = 'lltype'
     slow = False
 
     def setup_class(cls):

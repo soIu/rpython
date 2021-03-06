@@ -4,16 +4,9 @@ from rpython.jit.tl.tla import tla
 
 
 def entry_point(args):
-    for i in range(len(argv)):
-        if argv[i] == "--jit":
-            if len(argv) == i + 1:
-                print "missing argument after --jit"
-                return 2
-            jitarg = argv[i + 1]
-            del argv[i:i+2]
-            jit.set_user_param(jitdriver, jitarg)
-            break
-
+    """Main entry point of the stand-alone executable:
+    takes a list of strings and returns the exit code.
+    """
     if len(args) < 3:
         print "Usage: %s filename x" % (args[0],)
         return 2
@@ -33,7 +26,7 @@ def load_bytecode(filename):
     return bytecode
 
 def target(driver, args):
-    return entry_point
+    return entry_point, None
 
 # ____________________________________________________________
 

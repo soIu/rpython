@@ -1,5 +1,4 @@
 from rpython.rlib.rstring import StringBuilder
-from rpython.rlib.objectmodel import we_are_translated
 
 AT_END = -1
 
@@ -155,11 +154,8 @@ class RStringIO(object):
         assert p >= 0
         self.__copy_into_bigbuffer()
         end = len(self.__bigbuffer)
-        count = end - p
-        if size >= 0 and size < count:
+        if size >= 0 and size < end - p:
             end = p + size
-        if count <= 0:
-            return ''
         i = p
         while i < end:
             finished = self.__bigbuffer[i] == '\n'
@@ -167,11 +163,6 @@ class RStringIO(object):
             if finished:
                 break
         self.__pos = i
-        if not we_are_translated():
-            # assert that we read within the bounds!
-            bl = len(self.__bigbuffer)
-            assert p <= bl
-            assert i <= bl
         return ''.join(self.__bigbuffer[p:i])
 
     def truncate(self, size):

@@ -7,29 +7,19 @@ import py
 from struct import unpack
 from rpython.rlib.rstruct.formatiterator import FormatIterator
 from rpython.rlib.rstruct.error import StructError
-from rpython.rlib.objectmodel import specialize
-from rpython.rlib.buffer import StringBuffer
 
 class MasterReader(object):
     def __init__(self, s):
-        self.inputbuf = StringBuffer(s)
-        self.length = len(s)
+        self.input = s
         self.inputpos = 0
 
-    def can_advance(self, count):
-        end = self.inputpos + count
-        return end <= self.length
-
-    def advance(self, count):
-        if not self.can_advance(count):
-            raise StructError("unpack str size too short for format")
-        self.inputpos += count
-
     def read(self, count):
-        curpos = self.inputpos
-        end = curpos + count
-        self.advance(count) # raise if we are out of bound
-        return self.inputbuf.getslice(curpos, end, 1, count)
+        end = self.inputpos + count
+        if end > len(self.input):
+            raise StructError("unpack str size too short for format")
+        s = self.input[self.inputpos : end]
+        self.inputpos = end
+        return s
 
     def align(self, mask):
         self.inputpos = (self.inputpos + mask) & ~mask
@@ -48,15 +38,6 @@ def reader_for_pos(pos):
 
         def appendobj(self, value):
             self.value = value
-
-        def get_buffer_and_pos(self):
-            return self.mr.inputbuf, self.mr.inputpos
-
-        def can_advance(self, size):
-            return self.mr.can_advance(size)
-
-        def advance(self, size):
-            self.mr.advance(size)
     ReaderForPos.__name__ = 'ReaderForPos%d' % pos
     return ReaderForPos
 
@@ -107,19 +88,25 @@ class FrozenUnpackIterator(FormatIterator):
         exec source.compile() in miniglobals
         self.unpack = miniglobals['unpack'] # override not-rpython version
 
+    def unpack(self, s):
+        # NOT_RPYTHON
+        res = unpack(self.fmt, s)
+        if len(res) == 1:
+            return res[0]
+        return res
+
     def _freeze_(self):
         assert self.formats
         self._create_unpacking_func()
         return True
 
-@specialize.memo()
 def create_unpacker(unpack_str):
     fmtiter = FrozenUnpackIterator(unpack_str)
     fmtiter.interpret(unpack_str)
-    assert fmtiter._freeze_()
     return fmtiter
+create_unpacker._annspecialcase_ = 'specialize:memo'
 
-@specialize.arg(0)
 def runpack(fmt, input):
     unpacker = create_unpacker(fmt)
     return unpacker.unpack(input)
+runpack._annspecialcase_ = 'specialize:arg(0)'

@@ -1,3 +1,0 @@
-* implement more cases of copying _fields and _items between normal info
-  and ConstPtrInfo when proven constant (look at it)
-* reenable the int_add optimization

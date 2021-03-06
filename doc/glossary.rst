@@ -29,9 +29,6 @@ Glossary
       Code that makes it possible to write :doc:`RPython's garbage collectors <garbage_collection>`
       in Python itself.
 
-   guard
-      a small test that checks if assumptions the JIT makes during tracing are still true
-
    JIT
       :doc:`just in time compiler <jit/index>`.
 

@@ -4,10 +4,10 @@ import py
 import sys
 
 from rpython.translator import cdir
-from rpython.rlib import jit, rposix, objectmodel
-from rpython.rlib.rfloat import INFINITY, NAN, isfinite
-from rpython.rlib.rposix import UNDERSCORE_ON_WIN32
+from rpython.rlib import jit, rposix
+from rpython.rlib.rfloat import INFINITY, NAN, isfinite, isinf, isnan
 from rpython.rtyper.lltypesystem import lltype, rffi
+from rpython.rtyper.module.support import UNDERSCORE_ON_WIN32
 from rpython.tool.sourcetools import func_with_new_name
 from rpython.translator.tool.cbuild import ExternalCompilationInfo
 from rpython.translator.platform import platform
@@ -132,7 +132,8 @@ def ll_math_isfinite(y):
     # Floats are awesome (bis).
     if use_library_isinf_isnan and not jit.we_are_jitted():
         return bool(_lib_finite(y))
-    return (y - y) == 0.0    # (y - y) is NaN if y is an infinite or NaN
+    z = 0.0 * y
+    return z == z       # i.e.: z is not a NaN
 
 
 ll_math_floor = math_floor
@@ -147,13 +148,13 @@ def ll_math_atan2(y, x):
     Windows, FreeBSD and alpha Tru64 are amongst platforms that don't
     always follow C99.
     """
-    if math.isnan(x):
+    if isnan(x):
         return NAN
 
     if not isfinite(y):
-        if math.isnan(y):
+        if isnan(y):
             return NAN
-        if math.isinf(x):
+        if isinf(x):
             if math_copysign(1.0, x) == 1.0:
                 # atan2(+-inf, +inf) == +-pi/4
                 return math_copysign(0.25 * math.pi, y)
@@ -163,7 +164,7 @@ def ll_math_atan2(y, x):
         # atan2(+-inf, x) == +-pi/2 for finite x
         return math_copysign(0.5 * math.pi, y)
 
-    if math.isinf(x) or y == 0.0:
+    if isinf(x) or y == 0.0:
         if math_copysign(1.0, x) == 1.0:
             # atan2(+-y, +inf) = atan2(+-0, +x) = +-0.
             return math_copysign(0.0, y)
@@ -185,8 +186,6 @@ def ll_math_frexp(x):
         mantissa = x
         exponent = 0
     else:
-        if objectmodel.revdb_flag_io_disabled():
-            return _revdb_frexp(x)
         exp_p = lltype.malloc(rffi.INTP.TO, 1, flavor='raw')
         try:
             mantissa = math_frexp(x, exp_p)
@@ -213,7 +212,7 @@ def ll_math_ldexp(x, exp):
     else:
         r = math_ldexp(x, exp)
         errno = rposix.get_saved_errno()
-        if math.isinf(r):
+        if isinf(r):
             errno = ERANGE
     if errno:
         _likely_raise(errno, r)
@@ -223,10 +222,8 @@ def ll_math_ldexp(x, exp):
 def ll_math_modf(x):
     # some platforms don't do the right thing for NaNs and
     # infinities, so we take care of special cases directly.
-    if objectmodel.revdb_flag_io_disabled():
-        return _revdb_modf(x)
     if not isfinite(x):
-        if math.isnan(x):
+        if isnan(x):
             return (x, x)
         else:   # isinf(x)
             return (math_copysign(0.0, x), x)
@@ -241,13 +238,13 @@ def ll_math_modf(x):
 
 def ll_math_fmod(x, y):
     # fmod(x, +/-Inf) returns x for finite x.
-    if math.isinf(y) and isfinite(x):
+    if isinf(y) and isfinite(x):
         return x
 
     r = math_fmod(x, y)
     errno = rposix.get_saved_errno()
-    if math.isnan(r):
-        if math.isnan(x) or math.isnan(y):
+    if isnan(r):
+        if isnan(x) or isnan(y):
             errno = 0
         else:
             errno = EDOM
@@ -258,16 +255,16 @@ def ll_math_fmod(x, y):
 
 def ll_math_hypot(x, y):
     # hypot(x, +/-Inf) returns Inf, even if x is a NaN.
-    if math.isinf(x):
+    if isinf(x):
         return math_fabs(x)
-    if math.isinf(y):
+    if isinf(y):
         return math_fabs(y)
 
     r = math_hypot(x, y)
     errno = rposix.get_saved_errno()
     if not isfinite(r):
-        if math.isnan(r):
-            if math.isnan(x) or math.isnan(y):
+        if isnan(r):
+            if isnan(x) or isnan(y):
                 errno = 0
             else:
                 errno = EDOM
@@ -285,18 +282,18 @@ def ll_math_pow(x, y):
     # deal directly with IEEE specials, to cope with problems on various
     # platforms whose semantics don't exactly match C99
 
-    if math.isnan(y):
+    if isnan(y):
         if x == 1.0:
             return 1.0   # 1**Nan = 1
         return y
 
     if not isfinite(x):
-        if math.isnan(x):
+        if isnan(x):
             if y == 0.0:
                 return 1.0   # NaN**0 = 1
             return x
         else:   # isinf(x)
-            odd_y = not math.isinf(y) and math_fmod(math_fabs(y), 2.0) == 1.0
+            odd_y = not isinf(y) and math_fmod(math_fabs(y), 2.0) == 1.0
             if y > 0.0:
                 if odd_y:
                     return x
@@ -308,7 +305,7 @@ def ll_math_pow(x, y):
                     return math_copysign(0.0, x)
                 return 0.0
 
-    if math.isinf(y):
+    if isinf(y):
         if math_fabs(x) == 1.0:
             return 1.0
         elif y > 0.0 and math_fabs(x) > 1.0:
@@ -323,7 +320,7 @@ def ll_math_pow(x, y):
     r = math_pow(x, y)
     errno = rposix.get_saved_errno()
     if not isfinite(r):
-        if math.isnan(r):
+        if isnan(r):
             # a NaN result should arise only from (-ve)**(finite non-integer)
             errno = EDOM
         else:   # isinf(r)
@@ -367,12 +364,12 @@ def ll_math_log1p(x):
     return math_log1p(x)
 
 def ll_math_sin(x):
-    if math.isinf(x):
+    if isinf(x):
         raise ValueError("math domain error")
     return math_sin(x)
 
 def ll_math_cos(x):
-    if math.isinf(x):
+    if isinf(x):
         raise ValueError("math domain error")
     return math_cos(x)
 
@@ -393,8 +390,8 @@ def new_unary_math_function(name, can_overflow, c99):
         # Error checking fun.  Copied from CPython 2.6
         errno = rposix.get_saved_errno()
         if not isfinite(r):
-            if math.isnan(r):
-                if math.isnan(x):
+            if isnan(r):
+                if isnan(x):
                     errno = 0
                 else:
                     errno = EDOM
@@ -410,18 +407,6 @@ def new_unary_math_function(name, can_overflow, c99):
         return r
 
     return func_with_new_name(ll_math, 'll_math_' + name)
-
-
-def _revdb_frexp(x):
-    # moved in its own function for the import statement
-    from rpython.rlib import revdb
-    return revdb.emulate_frexp(x)
-
-def _revdb_modf(x):
-    # moved in its own function for the import statement
-    from rpython.rlib import revdb
-    return revdb.emulate_modf(x)
-
 
 # ____________________________________________________________
 

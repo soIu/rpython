@@ -1,6 +1,7 @@
 from __future__ import with_statement
 
 import rpython.rlib.rcomplex as c
+from rpython.rlib.rfloat import copysign, isnan, isinf
 import os, sys, math, struct
 
 
@@ -119,12 +120,12 @@ def rAssertAlmostEqual(a, b, rel_err = 2e-15, abs_err = 5e-323, msg=''):
     """
 
     # special values testing
-    if math.isnan(a):
-        if math.isnan(b):
+    if isnan(a):
+        if isnan(b):
             return
         raise AssertionError(msg + '%r should be nan' % (b,))
 
-    if math.isinf(a):
+    if isinf(a):
         if a == b:
             return
         raise AssertionError(msg + 'finite result where infinity expected: '
@@ -135,7 +136,8 @@ def rAssertAlmostEqual(a, b, rel_err = 2e-15, abs_err = 5e-323, msg=''):
     # and b to have opposite signs; in practice these hardly ever
     # occur).
     if not a and not b:
-        if math.copysign(1., a) != math.copysign(1., b):
+        # only check it if we are running on top of CPython >= 2.6
+        if sys.version_info >= (2, 6) and copysign(1., a) != copysign(1., b):
             raise AssertionError(msg + 'zero has wrong sign: expected %r, '
                                        'got %r' % (a, b))
 

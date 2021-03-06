@@ -62,17 +62,17 @@ var tempdir = path.join(os.tmpdir(), 'rpython-' + (new Date()).getTime());
 fs.mkdirSync(tempdir);
 process.env.PYPY_USESSION_DIR = platform === 'win32' ? cygpath(tempdir) : tempdir;
 process.env.USER = 'current';
-child_process.execSync([python, rpython, '--gc=none', '-s'].concat(process.argv.slice(2)).join(' '), {stdio: 'inherit', env: process.env});
+child_process.execSync([python, rpython, '--platform=emscripten', '--no-translation-jit', '-s'].concat(process.argv.slice(2)).join(' '), {stdio: 'inherit', env: process.env});
 if (process.argv[2] && process.argv[2].indexOf('.py') !== -1) {
   var file = process.argv[2].split('.py')[0];
   var directory = path.join(tempdir, 'usession-unknown-0', 'testing_1');
   var makefile = path.join(directory, 'Makefile');
   var make = fs.readFileSync(makefile).toString();
-  if (process.argv.indexOf('--use-pthread') === -1) make = make.replace(/-pthread/g, '');
+  //if (process.argv.indexOf('--use-pthread') === -1) make = make.replace(/-pthread/g, '');
   if (platform === 'win32') make = make.replace('RPYDIR = ', 'RPYDIR = "' + rpydir + '"#')
-  make = make.replace(/-lutil/g, '');
-  make = make.replace(/--export-all-symbols/g, '--export-dynamic');
-  make = make.replace('CC = ', 'CC = ' + emcc + ' -s ALLOW_MEMORY_GROWTH=1 #');
+  //make = make.replace(/-lutil/g, '');
+  //make = make.replace(/--export-all-symbols/g, '--export-dynamic');
+  //make = make.replace('CC = ', 'CC = ' + emcc + ' -s ALLOW_MEMORY_GROWTH=1 #');
   make = make.replace('TARGET = ', 'TARGET = ' + file + '.js #');
   make = make.replace('DEFAULT_TARGET = ', 'DEFAULT_TARGET = ' + file + '.js #');
   fs.writeFileSync(makefile, make);
@@ -99,3 +99,4 @@ if (process.argv[2] && process.argv[2].indexOf('.py') !== -1) {
     console.warn(error);
   }
 }
+

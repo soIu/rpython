@@ -6,10 +6,10 @@ from rpython.translator.sandbox.sandlib import SandboxedProc
 from rpython.translator.sandbox.sandlib import SimpleIOSandboxedProc
 from rpython.translator.sandbox.sandlib import VirtualizedSandboxedProc
 from rpython.translator.sandbox.sandlib import VirtualizedSocketProc
-from rpython.translator.sandbox.test.test_sandbox import compile
+from rpython.translator.sandbox.test.test_sandbox import compile, supported
 from rpython.translator.sandbox.vfs import Dir, File, RealDir, RealFile
 
-
+@supported
 class MockSandboxedProc(SandboxedProc):
     """A sandbox process wrapper that replays expected syscalls."""
 
@@ -35,7 +35,7 @@ class MockSandboxedProc(SandboxedProc):
     do_ll_os__ll_os_write = _make_method("write")
     do_ll_os__ll_os_close = _make_method("close")
 
-
+@supported
 def test_lib():
     def entry_point(argv):
         fd = os.open("/tmp/foobar", os.O_RDONLY, 0777)
@@ -63,6 +63,7 @@ def test_lib():
     proc.handle_forever()
     assert proc.seen == len(proc.expected)
 
+@supported
 def test_foobar():
     py.test.skip("to be updated")
     foobar = rffi.llexternal("foobar", [rffi.CCHARP], rffi.LONG)
@@ -79,6 +80,7 @@ def test_foobar():
     proc.handle_forever()
     assert proc.seen == len(proc.expected)
 
+@supported
 def test_simpleio():
     def entry_point(argv):
         print "Please enter a number:"
@@ -100,6 +102,7 @@ def test_simpleio():
     assert output == "Please enter a number:\nThe double is: 42\n"
     assert error == ""
 
+@supported
 def test_socketio():
     class SocketProc(VirtualizedSocketProc, SimpleIOSandboxedProc):
         def build_virtual_root(self):
@@ -114,13 +117,14 @@ def test_socketio():
 
     proc = SocketProc([exe])
     output, error = proc.communicate("")
-    assert output.startswith('HTTP/1.0 400 Bad request')
+    assert output.startswith('HTTP/1.1 301 Moved Permanently')
 
+@supported
 def test_oserror():
     def entry_point(argv):
         try:
             os.open("/tmp/foobar", os.O_RDONLY, 0777)
-        except OSError as e:
+        except OSError, e:
             os.close(e.errno)    # nonsense, just to see outside
         return 0
     exe = compile(entry_point)
@@ -133,6 +137,7 @@ def test_oserror():
     assert proc.seen == len(proc.expected)
 
 
+@supported
 class SandboxedProcWithFiles(VirtualizedSandboxedProc, SimpleIOSandboxedProc):
     """A sandboxed process with a simple virtualized filesystem.
 
@@ -145,6 +150,7 @@ class SandboxedProcWithFiles(VirtualizedSandboxedProc, SimpleIOSandboxedProc):
             'this.pyc': RealFile(__file__),
              })
 
+@supported
 def test_too_many_opens():
     def entry_point(argv):
         try:
@@ -155,7 +161,7 @@ def test_too_many_opens():
                 txt = os.read(fd, 100)
                 if txt != "Hello, world!\n":
                     print "Wrong content: %s" % txt
-        except OSError as e:
+        except OSError, e:
             # We expect to get EMFILE, for opening too many files.
             if e.errno != errno.EMFILE:
                 print "OSError: %s!" % (e.errno,)
@@ -170,7 +176,7 @@ def test_too_many_opens():
             for i in range(500):
                 fd = os.open('/this.pyc', os.O_RDONLY, 0777)
                 open_files.append(fd)
-        except OSError as e:
+        except OSError, e:
             # We expect to get EMFILE, for opening too many files.
             if e.errno != errno.EMFILE:
                 print "OSError: %s!" % (e.errno,)
@@ -186,6 +192,7 @@ def test_too_many_opens():
     assert output == "All ok!\n"
     assert error == ""
 
+@supported
 def test_fstat():
     def compare(a, b, i):
         if a != b:
@@ -208,7 +215,7 @@ def test_fstat():
             compare(st[7], fs[7], 7)
             compare(st[8], fs[8], 8)
             compare(st[9], fs[9], 9)
-        except OSError as e:
+        except OSError, e:
             print "OSError: %s" % (e.errno,)
         print "All ok!"
         return 0
@@ -219,6 +226,7 @@ def test_fstat():
     assert output == "All ok!\n"
     assert error == ""
 
+@supported
 def test_lseek():
     def char_should_be(c, should):
         if c != should:
@@ -248,10 +256,8 @@ def test_lseek():
     assert output == "All ok!\n"
     assert error == ""
 
+@supported
 def test_getuid():
-    if not hasattr(os, 'getuid'):
-        py.test.skip("posix only")
-
     def entry_point(argv):
         import os
         print "uid is %s" % os.getuid()

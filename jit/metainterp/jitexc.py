@@ -1,6 +1,6 @@
 from rpython.rtyper.annlowlevel import cast_instance_to_base_ptr
 from rpython.rtyper.annlowlevel import cast_base_ptr_to_instance
-from rpython.rtyper.lltypesystem import lltype, llmemory
+from rpython.rtyper.lltypesystem import lltype
 from rpython.rtyper import rclass
 from rpython.rtyper.llinterp import LLException
 from rpython.rlib.objectmodel import we_are_translated
@@ -22,15 +22,13 @@ class DoneWithThisFrameInt(JitException):
     def __init__(self, result):
         assert lltype.typeOf(result) is lltype.Signed
         self.result = result
-
     def __str__(self):
         return 'DoneWithThisFrameInt(%s)' % (self.result,)
 
 class DoneWithThisFrameRef(JitException):
-    def __init__(self, result):
-        assert lltype.typeOf(result) == llmemory.GCREF
+    def __init__(self, cpu, result):
+        assert lltype.typeOf(result) == cpu.ts.BASETYPE
         self.result = result
-
     def __str__(self):
         return 'DoneWithThisFrameRef(%s)' % (self.result,)
 
@@ -38,15 +36,13 @@ class DoneWithThisFrameFloat(JitException):
     def __init__(self, result):
         assert lltype.typeOf(result) is longlong.FLOATSTORAGE
         self.result = result
-
     def __str__(self):
         return 'DoneWithThisFrameFloat(%s)' % (self.result,)
 
 class ExitFrameWithExceptionRef(JitException):
-    def __init__(self, value):
-        assert lltype.typeOf(value) == llmemory.GCREF
+    def __init__(self, cpu, value):
+        assert lltype.typeOf(value) == cpu.ts.BASETYPE
         self.value = value
-
     def __str__(self):
         return 'ExitFrameWithExceptionRef(%s)' % (self.value,)
 
@@ -64,14 +60,6 @@ class ContinueRunningNormally(JitException):
         return 'ContinueRunningNormally(%s, %s, %s, %s, %s, %s)' % (
             self.green_int, self.green_ref, self.green_float,
             self.red_int, self.red_ref, self.red_float)
-
-class NotAVectorizeableLoop(JitException):
-    def __str__(self):
-        return 'NotAVectorizeableLoop()'
-
-class NotAProfitableLoop(JitException):
-    def __str__(self):
-        return 'NotAProfitableLoop()'
 
 
 def _get_standard_error(rtyper, Class):

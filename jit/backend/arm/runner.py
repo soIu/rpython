@@ -7,14 +7,13 @@ from rpython.jit.backend.llsupport.llmodel import AbstractLLCPU
 from rpython.rlib.jit_hooks import LOOP_RUN_CONTAINER
 from rpython.rtyper.lltypesystem import lltype, llmemory
 from rpython.jit.backend.arm.detect import detect_hardfloat
-from rpython.jit.backend.arm.detect import detect_arch_version, detect_neon
+from rpython.jit.backend.arm.detect import detect_arch_version
 
 jitframe.STATICSIZE = JITFRAME_FIXED_SIZE
 
 class CPUInfo(object):
     hf_abi = False
     arch_version = 6
-    neon = False
 
 class AbstractARMCPU(AbstractLLCPU):
 
@@ -30,10 +29,6 @@ class AbstractARMCPU(AbstractLLCPU):
     float_regs = VFPRegisterManager.all_regs
     frame_reg = fp
 
-    # can an ISA instruction handle a factor to the offset?
-    # XXX should be: tuple(1 << i for i in range(31))
-    load_supported_factors = (1,)
-
     def __init__(self, rtyper, stats, opts=None, translate_support_code=False,
                  gcdescr=None):
         AbstractLLCPU.__init__(self, rtyper, stats, opts,
@@ -43,13 +38,18 @@ class AbstractARMCPU(AbstractLLCPU):
     def set_debug(self, flag):
         return self.assembler.set_debug(flag)
 
+    def get_failargs_limit(self):
+        if self.opts is not None:
+            return self.opts.failargs_limit
+        else:
+            return 1000
+
     def setup(self):
         self.assembler = AssemblerARM(self, self.translate_support_code)
 
     def setup_once(self):
         self.cpuinfo.arch_version = detect_arch_version()
         self.cpuinfo.hf_abi = detect_hardfloat()
-        self.cpuinfo.neon = detect_neon()
         #self.codemap.setup()
         self.assembler.setup_once()
 
@@ -63,6 +63,12 @@ class AbstractARMCPU(AbstractLLCPU):
         return self.assembler.assemble_bridge(logger, faildescr, inputargs,
                                               operations,
                                               original_loop_token, log=log)
+
+    def clear_latest_values(self, count):
+        setitem = self.assembler.fail_boxes_ptr.setitem
+        null = lltype.nullptr(llmemory.GCREF.TO)
+        for index in range(count):
+            setitem(index, null)
 
     def cast_ptr_to_int(x):
         adr = llmemory.cast_ptr_to_adr(x)

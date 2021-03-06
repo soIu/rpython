@@ -10,13 +10,23 @@ from rpython.tool.killsubprocess import killsubprocess
 from rpython.translator.sandbox.vfs import UID, GID
 import py
 
-WIN32 = os.name == "nt"
-
-
 def create_log():
     """Make and return a log for the sandbox to use, if needed."""
-    from rpython.tool.ansi_print import AnsiLogger
-    return AnsiLogger("sandlib")
+    # These imports are local to avoid importing pypy if we don't need to.
+    from rpython.tool.ansi_print import AnsiLog
+
+    class MyAnsiLog(AnsiLog):
+        KW_TO_COLOR = {
+            'call': ((34,), False),
+            'result': ((34,), False),
+            'exception': ((34,), False),
+            'vpath': ((35,), False),
+            'timeout': ((1, 31), True),
+            }
+
+    log = py.log.Producer("sandlib")
+    py.log.setconsumer("sandlib", MyAnsiLog())
+    return log
 
 # Note: we use lib_pypy/marshal.py instead of the built-in marshal
 # for two reasons.  The built-in module could be made to segfault
@@ -30,7 +40,14 @@ from rpython.translator.sandbox import _marshal as marshal
 RESULTTYPE_STATRESULT = object()
 RESULTTYPE_LONGLONG = object()
 
-def read_message(f):
+def read_message(f, timeout=None):
+    # warning: 'timeout' is not really reliable and should only be used
+    # for testing.  Also, it doesn't work if the file f does any buffering.
+    if timeout is not None:
+        import select
+        iwtd, owtd, ewtd = select.select([f], [], [], timeout)
+        if not iwtd:
+            raise EOFError("timed out waiting for data")
     return marshal.load(f)
 
 def write_message(g, msg, resulttype=None):
@@ -123,7 +140,7 @@ class SandboxedProc(object):
                                       bufsize=-1,
                                       stdin=subprocess.PIPE,
                                       stdout=subprocess.PIPE,
-                                      close_fds=False if WIN32 else True,
+                                      close_fds=True,
                                       env={})
         self.popenlock = None
         self.currenttimeout = None
@@ -235,14 +252,14 @@ class SandboxedProc(object):
             try:
                 fnname = read_message(child_stdout)
                 args   = read_message(child_stdout)
-            except EOFError as e:
+            except EOFError, e:
                 break
             if self.log and not self.is_spam(fnname, *args):
                 self.log.call('%s(%s)' % (fnname,
                                      ', '.join([shortrepr(x) for x in args])))
             try:
                 answer, resulttype = self.handle_message(fnname, *args)
-            except Exception as e:
+            except Exception, e:
                 tb = sys.exc_info()[2]
                 write_exception(child_stdin, e, tb)
                 if self.log:
@@ -445,7 +462,7 @@ class VirtualizedSandboxedProc(SandboxedProc):
     def do_ll_os__ll_os_access(self, vpathname, mode):
         try:
             node = self.get_node(vpathname)
-        except OSError as e:
+        except OSError, e:
             if e.errno == errno.ENOENT:
                 return False
             raise
@@ -526,12 +543,6 @@ class VirtualizedSandboxedProc(SandboxedProc):
     def do_ll_os__ll_os_listdir(self, vpathname):
         node = self.get_node(vpathname)
         return node.keys()
-
-    def do_ll_os__ll_os_unlink(self, vpathname):
-        raise OSError(errno.EPERM, "write access denied")
-
-    def do_ll_os__ll_os_mkdir(self, vpathname, mode=None):
-        raise OSError(errno.EPERM, "write access denied")
 
     def do_ll_os__ll_os_getuid(self):
         return UID

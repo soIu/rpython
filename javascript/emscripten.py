@@ -358,7 +358,8 @@ EM_JS(const char*, run_unsafe_code, (const char* code), {
 """
 def rffi_1(function, void=False):
     def wrapper(arg1, skip_gc=False):
-        if not skip_gc and globals.collector_id is None: run_garbage_collector()
+        #if not skip_gc and globals.collector_id is None:
+        if not skip_gc: run_garbage_collector()
         pointer = function(rffi.str2charp(arg1))
         if void: return
         result = rffi.charp2str(pointer)
@@ -368,7 +369,8 @@ def rffi_1(function, void=False):
 
 def rffi_2(function, void=False):
     def wrapper(arg1, arg2, skip_gc=False):
-        if not skip_gc and globals.collector_id is None: run_garbage_collector()
+        #if not skip_gc and globals.collector_id is None:
+        if not skip_gc: run_garbage_collector()
         pointer = function(rffi.str2charp(arg1), rffi.str2charp(arg2))
         if void: return
         result = rffi.charp2str(pointer)
@@ -378,7 +380,8 @@ def rffi_2(function, void=False):
 
 def rffi_3(function, void=False):
     def wrapper(arg1, arg2, arg3, skip_gc=False):
-        if not skip_gc and globals.collector_id is None: run_garbage_collector()
+        #if not skip_gc and globals.collector_id is None:
+        if not skip_gc: run_garbage_collector()
         pointer = function(rffi.str2charp(arg1), rffi.str2charp(arg2), rffi.str2charp(arg3))
         if void: return
         result = rffi.charp2str(pointer)
@@ -409,7 +412,8 @@ get_float = rffi_1(rffi.llexternal('get_float', [rffi.CCHARP], rffi.CCHARP, comp
 get_boolean = rffi_1(rffi.llexternal('get_boolean', [rffi.CCHARP], rffi.CCHARP, compilation_info=info))
 
 def run_javascript(code, returns=False, skip_gc=False):
-    if not skip_gc and globals.collector_id is None: run_garbage_collector()
+    #if not skip_gc and globals.collector_id is None:
+    if not skip_gc: run_garbage_collector()
     code = '(function(Module, global) {' + code + '})'
     return run_unsafe_code(code)
     """if returns:
@@ -502,9 +506,9 @@ def onfunctioncall(*arguments):
     variable, function_id = [rffi.charp2str(pointer) for pointer in pointers]
     for pointer in pointers: lltype.free(pointer, flavor='raw')
     args = Object.get(variable, function_id).toArray()
-    #id = int(function_id)
-    #return
-    function = functions[int(function_id)]
+    id = int(function_id)
+    if id not in functions: return
+    function = functions[id]
     result = function(args=[arg for arg in args]) #if function in decorated_functions else function([arg for arg in args])
     run_safe_set('global', 'rpyfunction_call_' + function_id, ('"%s"' % result.variable) if result is not None else 'null', skip_gc=True)
     #run_javascript('global.rpyfunction_call_' + function_id + ((' = "%s"' % result.variable) if result is not None else ' = null'), skip_gc=True)
@@ -545,11 +549,11 @@ def garbage_collector(args):
 
 def run_garbage_collector():
     globals.collector_id = ''
-    if globals.garbage is None:
+    if globals.garbage == None:
        globals.garbage = {}
     #if globals.collector_function is None:
     globals.collector_function = json.fromFunction(garbage_collector)
-    if globals.setTimeout is None:
+    if globals.setTimeout == None:
        globals.setTimeout = Object('setTimeout').keep().toFunction()
     setTimeout = globals.setTimeout
     timeout = setTimeout(globals.collector_function, json.fromInteger(0))
@@ -667,7 +671,7 @@ class Array:
 
     def __iter__(self):
         object = self.object['length']
-        if object.type != 'number': return iter([])
+        #if object.type != 'number': return iter([])
         length = object.toInteger()
         objects = []
         for index in range(length):

@@ -3,7 +3,6 @@
 import py, os, sys
 
 from rpython.translator.platform import Platform, log, _run_subprocess
-from rpython.config.support import detect_pax
 
 import rpython
 rpydir = str(py.path.local(rpython.__file__).join('..'))
@@ -11,7 +10,6 @@ rpydir = str(py.path.local(rpython.__file__).join('..'))
 class BasePosix(Platform):
     exe_ext = ''
     make_cmd = 'make'
-    so_prefixes = ('lib', '')
 
     relevant_environ = ('CPATH', 'LIBRARY_PATH', 'C_INCLUDE_PATH')
 
@@ -55,7 +53,7 @@ class BasePosix(Platform):
         args = [str(ofile) for ofile in ofiles] + link_args
         args += ['-o', str(exe_name)]
         if not standalone:
-            args = self._args_for_shared(args, exe_name=exe_name)
+            args = self._args_for_shared(args)
         self._execute_c_compiler(cc, args, exe_name,
                                  cwd=str(exe_name.dirpath()))
         return exe_name
@@ -63,7 +61,7 @@ class BasePosix(Platform):
     def _pkg_config(self, lib, opt, default, check_result_dir=False):
         try:
             ret, out, err = _run_subprocess("pkg-config", [lib, opt])
-        except OSError as e:
+        except OSError, e:
             err = str(e)
             ret = 1
         if ret:
@@ -99,12 +97,9 @@ class BasePosix(Platform):
     def get_shared_only_compile_flags(self):
         return tuple(self.shared_only) + ('-fvisibility=hidden',)
 
-    def makefile_link_flags(self):
-        return list(self.link_flags)
-
     def gen_makefile(self, cfiles, eci, exe_name=None, path=None,
                      shared=False, headers_to_precompile=[],
-                     no_precompile_cfiles = [], profopt=False, config=None):
+                     no_precompile_cfiles = [], icon=None):
         cfiles = self._all_cfiles(cfiles, eci)
 
         if path is None:
@@ -117,7 +112,7 @@ class BasePosix(Platform):
         else:
             exe_name = exe_name.new(ext=self.exe_ext)
 
-        linkflags = self.makefile_link_flags()
+        linkflags = list(self.link_flags)
         if shared:
             linkflags = self._args_for_shared(linkflags)
 
@@ -134,10 +129,6 @@ class BasePosix(Platform):
         else:
             cflags = tuple(self.cflags) + tuple(self.standalone_only)
 
-        # xxx check which compilers accept this option or not
-        if config and config.translation.lto:
-            cflags = ('-flto',) + cflags
-
         m = GnuMakefile(path)
         m.exe_name = path.join(exe_name.basename)
         m.eci = eci
@@ -147,13 +138,6 @@ class BasePosix(Platform):
             rel = lpath.relto(rpypath)
             if rel:
                 return os.path.join('$(RPYDIR)', rel)
-            # Hack: also relativize from the path '$RPYDIR/..'.
-            # Otherwise, when translating pypy, we get the paths in
-            # pypy/module/* that are kept as absolute, which makes the
-            # whole purpose of $RPYDIR rather pointless.
-            rel = lpath.relto(rpypath.join('..'))
-            if rel:
-                return os.path.join('$(RPYDIR)', '..', rel)
             m_dir = m.makefile_dir
             if m_dir == lpath:
                 return '.'
@@ -190,33 +174,18 @@ class BasePosix(Platform):
             ('LINKFILES', eci.link_files),
             ('RPATH_FLAGS', self.get_rpath_flags(rel_libdirs)),
             ]
-
-        if profopt==True and shared==True:
-            definitions.append(('PROFOPT_TARGET', exe_name.basename))
-
         for args in definitions:
             m.definition(*args)
 
-        # Post compile rule to be executed after a TARGET is ran
-        #
-        # Some processing might be necessary on the resulting binary,
-        # which is received in $(BIN) parameter
-        postcompile_rule = ('postcompile', '', ['true'])
-        if detect_pax():
-            postcompile_rule[2].append('attr -q -s pax.flags -V m $(BIN)')
-
         rules = [
             ('all', '$(DEFAULT_TARGET)', []),
-            ('$(TARGET)', '$(OBJECTS)', ['$(CC_LINK) $(LDFLAGSEXTRA) -o $@ $(OBJECTS) $(LIBDIRS) $(LIBS) $(LINKFILES) $(LDFLAGS)', '$(MAKE) postcompile BIN=$(TARGET)']),
+            ('$(TARGET)', '$(OBJECTS)', '$(CC_LINK) $(LDFLAGSEXTRA) -o $@ $(OBJECTS) $(LIBDIRS) $(LIBS) $(LINKFILES) $(LDFLAGS)'),
             ('%.o', '%.c', '$(CC) $(CFLAGS) $(CFLAGSEXTRA) -o $@ -c $< $(INCLUDEDIRS)'),
-            ('%.o', '%.s', '$(CC) $(CFLAGS) $(CFLAGSEXTRA) -o $@ -c $< $(INCLUDEDIRS)'),
             ('%.o', '%.cxx', '$(CXX) $(CFLAGS) $(CFLAGSEXTRA) -o $@ -c $< $(INCLUDEDIRS)'),
             ]
 
         for rule in rules:
             m.rule(*rule)
-
-        m.rule(*postcompile_rule)
 
         if shared:
             m.definition('SHARED_IMPORT_LIB', libname),
@@ -227,7 +196,7 @@ class BasePosix(Platform):
                    'int main(int argc, char* argv[]) '
                    '{ return $(PYPY_MAIN_FUNCTION)(argc, argv); }" > $@')
             m.rule('$(DEFAULT_TARGET)', ['$(TARGET)', 'main.o'],
-                   ['$(CC_LINK) $(LDFLAGS_LINK) main.o -L. -l$(SHARED_IMPORT_LIB) -o $@ $(RPATH_FLAGS)', '$(MAKE) postcompile BIN=$(DEFAULT_TARGET)'])
+                   '$(CC_LINK) $(LDFLAGS_LINK) main.o -L. -l$(SHARED_IMPORT_LIB) -o $@ $(RPATH_FLAGS)')
 
         return m
 

@@ -31,7 +31,7 @@ class FakeCPU:
         def __repr__(self):
             return '<FieldDescr %s>' % self.fieldname
     class sizeof(AbstractDescr):
-        def __init__(self, STRUCT, vtable=None):
+        def __init__(self, STRUCT):
             self.STRUCT = STRUCT
         def __repr__(self):
             return '<SizeDescr>'
@@ -39,7 +39,7 @@ class FakeCPU:
 class FakeCallControl:
     class getcalldescr(AbstractDescr):
         def __init__(self, op, oopspecindex=0, extraeffect=None,
-                     extradescr=None, calling_graph=None):
+                     extradescr=None):
             self.op = op
             self.oopspecindex = oopspecindex
         def __repr__(self):

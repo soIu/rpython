@@ -25,8 +25,6 @@ Content
    pyjitpl5
    optimizer
    virtualizable
-   vectorization
-   backend
 
 - :doc:`Overview <overview>`: motivating our approach
 
@@ -35,8 +33,5 @@ Content
 - :doc:`Optimizer <optimizer>`: the step between tracing and writing
   machine code
 
-- :doc:`Virtualizable <virtualizable>`: how virtualizables work and what
-  they are (in other words how to make frames more efficient).
-
-- :doc:`Assembler backend <backend>`: draft notes about the organization
-  of the assembler backends
+- :doc:`Virtulizable <virtualizable>` how virtualizables work and what they are
+  (in other words how to make frames more efficient).

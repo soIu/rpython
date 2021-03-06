@@ -5,16 +5,20 @@
 # error "skiplist.c needs to be included before"
 #endif
 
-#ifdef RPYTHON_VMPROF
-RPY_EXTERN void vmprof_ignore_signals(int ignored);
-static void pypy_codemap_invalid_set(int ignored) {
-    vmprof_ignore_signals(ignored);
-}
+volatile int pypy_codemap_currently_invalid = 0;
+
+void pypy_codemap_invalid_set(int value)
+{
+#ifndef _MSC_VER
+    if (value)
+        __sync_lock_test_and_set(&pypy_codemap_currently_invalid, 1);
+    else
+        __sync_lock_release(&pypy_codemap_currently_invalid);
 #else
-static void pypy_codemap_invalid_set(int ignored) {
-    /* nothing */
-}
+    _InterlockedExchange((long volatile *)&pypy_codemap_currently_invalid,
+                        (long)value);
 #endif
+}
 
 
 /************************************************************/
@@ -139,3 +143,78 @@ long pypy_yield_codemap_at_addr(void *codemap_raw, long addr,
         current_pos = data->bytecode_info[current_pos + 3];
     }
 }
+
+/************************************************************/
+/***  depthmap storage                                    ***/
+/************************************************************/
+
+typedef struct {
+    unsigned int block_size;
+    unsigned int stack_depth;
+} depthmap_data_t;
+
+static skipnode_t jit_depthmap_head;
+
+/*** interface used from codemap.py ***/
+
+RPY_EXTERN
+long pypy_jit_depthmap_add(unsigned long addr, unsigned int size,
+                           unsigned int stackdepth)
+{
+    skipnode_t *new = skiplist_malloc(sizeof(depthmap_data_t));
+    depthmap_data_t *data;
+    if (new == NULL)
+        return -1;   /* too bad */
+
+    new->key = addr;
+    data = (depthmap_data_t *)new->data;
+    data->block_size = size;
+    data->stack_depth = stackdepth;
+
+    pypy_codemap_invalid_set(1);
+    skiplist_insert(&jit_depthmap_head, new);
+    pypy_codemap_invalid_set(0);
+    return 0;
+}
+
+RPY_EXTERN
+void pypy_jit_depthmap_clear(unsigned long addr, unsigned int size)
+{
+    unsigned long search_key = addr + size - 1;
+    if (size == 0)
+        return;
+
+    pypy_codemap_invalid_set(1);
+    while (1) {
+        /* search for all nodes belonging to the range, and remove them */
+        skipnode_t *node = skiplist_search(&jit_depthmap_head, search_key);
+        if (node->key < addr)
+            break;   /* exhausted */
+        skiplist_remove(&jit_depthmap_head, node->key);
+        free(node);
+    }
+    pypy_codemap_invalid_set(0);
+}
+
+/*** interface used from pypy/module/_vmprof ***/
+
+RPY_EXTERN
+long pypy_jit_stack_depth_at_loc(long loc)
+{
+    skipnode_t *depthmap = skiplist_search(&jit_depthmap_head,
+                                           (unsigned long)loc);
+    depthmap_data_t *data;
+    unsigned long rel_addr;
+
+    if (depthmap == &jit_depthmap_head)
+        return -1;
+
+    rel_addr = (unsigned long)loc - depthmap->key;
+    data = (depthmap_data_t *)depthmap->data;
+    if (rel_addr >= data->block_size)
+        return -1;
+
+    return data->stack_depth;
+}
+
+/************************************************************/

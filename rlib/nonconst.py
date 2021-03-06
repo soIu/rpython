@@ -39,4 +39,7 @@ class EntryNonConstant(ExtRegistryEntry):
 
     def specialize_call(self, hop):
         hop.exception_cannot_occur()
-        return hop.inputarg(hop.r_result, arg=0)
+        retval = Constant(hop.r_result.convert_const(hop.args_v[0].value))
+        retval.concretetype = hop.r_result.lowleveltype
+        return retval
+

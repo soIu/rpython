@@ -1,15 +1,16 @@
 import weakref
 from rpython.rlib.debug import debug_start, debug_print, debug_stop
 from rpython.rtyper.lltypesystem import lltype, llmemory
-from rpython.rtyper.rclass import OBJECTPTR
-from rpython.jit.metainterp.history import ConstInt
-from rpython.jit.metainterp.support import ptr2int
 
 class CPUTotalTracker(object):
     total_compiled_loops = 0
     total_compiled_bridges = 0
     total_freed_loops = 0
     total_freed_bridges = 0
+
+    # for heaptracker
+    # _all_size_descrs_with_vtable = None
+    _vtable_to_descr_dict = None
 
 class AbstractCPU(object):
     supports_floats = False
@@ -18,11 +19,8 @@ class AbstractCPU(object):
     # longlongs are supported by the JIT, but stored as doubles.
     # Boxes and Consts are BoxFloats and ConstFloats.
     supports_singlefloats = False
-    supports_guard_gc_type = False
 
     propagate_exception_descr = None
-
-    remove_gctypeptr = False
 
     def __init__(self):
         self.tracker = CPUTotalTracker()
@@ -195,10 +193,6 @@ class AbstractCPU(object):
         x = llmemory.cast_int_to_adr(x)
         return llmemory.cast_adr_to_ptr(x, TYPE)
 
-    def cls_of_box(self, box):
-        obj = lltype.cast_opaque_ptr(OBJECTPTR, box.getref_base())
-        return ConstInt(ptr2int(obj.typeptr))
-
 
     # ---------- the backend-dependent operations ----------
 
@@ -235,6 +229,8 @@ class AbstractCPU(object):
     def bh_newstr(self, length):
         raise NotImplementedError
     def bh_newunicode(self, length):
+        raise NotImplementedError
+    def bh_new_raw_buffer(self, size):
         raise NotImplementedError
 
     def bh_arraylen_gc(self, array, arraydescr):
@@ -290,7 +286,7 @@ class AbstractCPU(object):
 
 class CompiledLoopToken(object):
     asmmemmgr_blocks = None
-    asmmemmgr_gcreftracers = None
+    asmmemmgr_gcroots = 0
 
     def __init__(self, cpu, number):
         cpu.tracker.total_compiled_loops += 1

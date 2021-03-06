@@ -1,22 +1,14 @@
-import sys
 from rpython.rtyper.lltypesystem import lltype, rffi
 from rpython.translator.tool.cbuild import ExternalCompilationInfo
 from rpython.jit.backend.llsupport.symbolic import WORD
 
 
-if sys.byteorder == 'little' or sys.maxint <= 2**32:
-    long2int = int2long = lambda x: x
-else:
-    def long2int(x): return x >> 32
-    def int2long(x): return x << 32
-
-
 def get_debug_saved_errno(cpu):
-    return long2int(cpu._debug_errno_container[3])
+    return cpu._debug_errno_container[3]
 
 def set_debug_saved_errno(cpu, nerrno):
     assert nerrno >= 0
-    cpu._debug_errno_container[3] = int2long(nerrno)
+    cpu._debug_errno_container[3] = nerrno
 
 def get_rpy_errno_offset(cpu):
     if cpu.translate_support_code:
@@ -27,11 +19,11 @@ def get_rpy_errno_offset(cpu):
 
 
 def get_debug_saved_alterrno(cpu):
-    return long2int(cpu._debug_errno_container[4])
+    return cpu._debug_errno_container[4]
 
 def set_debug_saved_alterrno(cpu, nerrno):
     assert nerrno >= 0
-    cpu._debug_errno_container[4] = int2long(nerrno)
+    cpu._debug_errno_container[4] = nerrno
 
 def get_alt_errno_offset(cpu):
     if cpu.translate_support_code:

@@ -8,10 +8,8 @@ from rpython.jit.metainterp.test import support
 from rpython.rlib.jit import JitDriver
 
 class JitARMMixin(support.LLJitMixin):
+    type_system = 'lltype'
     CPUClass = getcpuclass()
-    # we have to disable unroll
-    enable_opts = "intbounds:rewrite:virtualize:string:earlyforce:pure:heap"
-    basic = False
 
     def check_jumps(self, maxcount):
         pass
@@ -67,7 +65,7 @@ def gen_test_function(name, asm, args, kwargs=None, asm_ext=None):
         func(*args, **kwargs)
         try:
             f_name = name[:name.index('_')]
-        except ValueError as e:
+        except ValueError, e:
             f_name = name
         self.assert_equal('%s%s %s' % (f_name, asm_ext, asm))
     return f

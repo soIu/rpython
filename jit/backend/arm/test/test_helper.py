@@ -1,8 +1,6 @@
 from rpython.jit.backend.arm.helper.assembler import count_reg_args
-from rpython.jit.metainterp.history import INT, REF, FLOAT
-from rpython.jit.metainterp.resoperation import InputArgInt as BoxInt
-from rpython.jit.metainterp.resoperation import InputArgRef as BoxPtr
-from rpython.jit.metainterp.resoperation import InputArgFloat as BoxFloat
+from rpython.jit.metainterp.history import (BoxInt, BoxPtr, BoxFloat,
+                                        INT, REF, FLOAT)
 
 
 def test_count_reg_args():

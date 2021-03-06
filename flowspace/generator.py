@@ -132,14 +132,13 @@ def tweak_generator_body_graph(Entry, graph):
                 del block.operations[index]
                 newlink = split_block(block, index)
                 newblock = newlink.target
-                varnames = get_variable_names(newlink.args)
                 #
                 class Resume(AbstractPosition):
                     _immutable_ = True
-                    _attrs_ = varnames
                     block = newblock
                 Resume.__name__ = 'Resume%d' % len(mappings)
                 mappings.append(Resume)
+                varnames = get_variable_names(newlink.args)
                 #
                 _insert_reads(newblock, varnames)
                 #
@@ -157,7 +156,8 @@ def tweak_generator_body_graph(Entry, graph):
     regular_entry_block = Block([Variable('entry')])
     block = regular_entry_block
     for Resume in mappings:
-        op_check = op.isinstance(block.inputargs[0], const(Resume))
+        op_check = op.simple_call(
+            const(isinstance), block.inputargs[0], const(Resume))
         block.operations.append(op_check)
         block.exitswitch = op_check.result
         link1 = Link([block.inputargs[0]], Resume.block)

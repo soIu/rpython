@@ -14,16 +14,16 @@ _annotation_cache = {}
 
 def _annotation_key(t):
     from rpython.rtyper import extregistry
-    if isinstance(t, list):
+    if type(t) is list:
         assert len(t) == 1
         return ('list', _annotation_key(t[0]))
-    elif isinstance(t, dict):
+    elif type(t) is dict:
         assert len(t.keys()) == 1
         return ('dict', _annotation_key(t.items()[0]))
     elif isinstance(t, tuple):
         return tuple([_annotation_key(i) for i in t])
     elif extregistry.is_registered(t):
-        # XXX do we want to do something in this case?
+        # XXX should it really be always different?
         return t
     return t
 
@@ -38,36 +38,24 @@ def annotation(t, bookkeeper=None):
             return t
     return _compute_annotation(t, bookkeeper)
 
-
-def _validate_annotation_size(t):
-    try:
-        _ = iter(t)
-    except TypeError:  # if it's not an iterable, just return
-        return t       # (size does not matter)
-    if isinstance(t, tuple):  # we accept tuples with any length, because
-        return t              # their in-memory representation is predictable
-    if len(t) > 1:
-        raise TypeError("Cannot specify multiple types in a %s (try using tuple)", type(t))
-
-
 def _compute_annotation(t, bookkeeper=None):
     from rpython.rtyper.lltypesystem import lltype
     from rpython.rtyper.llannotation import lltype_to_annotation
-    _validate_annotation_size(t)
     if isinstance(t, SomeObject):
         return t
     elif isinstance(t, lltype.LowLevelType):
         return lltype_to_annotation(t)
     elif isinstance(t, list):
-        return SomeList(
-                ListDef(bookkeeper, annotation(t[0]),
-                        mutated=True, resized=True))
+        assert len(t) == 1, "We do not support type joining in list"
+        listdef = ListDef(bookkeeper, annotation(t[0]), mutated=True, resized=True)
+        return SomeList(listdef)
     elif isinstance(t, tuple):
         return SomeTuple(tuple([annotation(i) for i in t]))
     elif isinstance(t, dict):
-        return SomeDict(
-                DictDef(bookkeeper,
-                        annotation(t.keys()[0]), annotation(t.values()[0])))
+        assert len(t) == 1, "We do not support type joining in dict"
+        result = SomeDict(DictDef(bookkeeper, annotation(t.keys()[0]),
+                                annotation(t.values()[0])))
+        return result
     elif type(t) is types.NoneType:
         return s_None
     elif extregistry.is_registered(t):
@@ -96,14 +84,15 @@ def annotationoftype(t, bookkeeper=False):
     elif t is types.NoneType:
         return s_None
     elif bookkeeper and extregistry.is_registered_type(t):
-        return (extregistry.lookup_type(t)
-                .compute_annotation_bk(bookkeeper))
+        entry = extregistry.lookup_type(t)
+        return entry.compute_annotation_bk(bookkeeper)
     elif t is type:
         return SomeType()
     elif bookkeeper and not hasattr(t, '_freeze_'):
-        return SomeInstance(bookkeeper.getuniqueclassdef(t))
+        classdef = bookkeeper.getuniqueclassdef(t)
+        return SomeInstance(classdef)
     else:
-        raise TypeError("Annotation of type %r not supported" % (t,))
+        raise AssertionError("annotationoftype(%r)" % (t,))
 
 class Sig(object):
 
@@ -111,7 +100,6 @@ class Sig(object):
         self.argtypes = argtypes
 
     def __call__(self, funcdesc, inputcells):
-        from rpython.rlib.objectmodel import NOT_CONSTANT
         from rpython.rtyper.lltypesystem import lltype
         args_s = []
         from rpython.annotator import model as annmodel
@@ -127,9 +115,6 @@ class Sig(object):
                 args_s.append(s_input)
             elif argtype is None:
                 args_s.append(inputcells[i])     # no change
-            elif argtype is NOT_CONSTANT:
-                from rpython.annotator.model import not_const
-                args_s.append(not_const(inputcells[i]))
             else:
                 args_s.append(annotation(argtype, bookkeeper=funcdesc.bookkeeper))
         if len(inputcells) != len(args_s):

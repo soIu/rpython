@@ -1,4 +1,4 @@
-from rpython.rtyper.lltypesystem import lltype, llmemory, llarena, llgroup, rffi
+from rpython.rtyper.lltypesystem import lltype, llmemory, llarena, llgroup
 from rpython.rtyper import rclass
 from rpython.rtyper.lltypesystem.lloperation import llop
 from rpython.rlib.debug import ll_assert
@@ -17,25 +17,16 @@ class GCData(object):
 
     OFFSETS_TO_GC_PTR = lltype.Array(lltype.Signed)
 
-    # A CUSTOM_FUNC is either a destructor, or a custom tracer.
-    # A destructor is called when the object is about to be freed.
-    # A custom tracer (CT) enumerates the addresses that contain GCREFs.
-    # Both are called with the address of the object as only argument.
-    # They're embedded in a struct that has raw_memory_offset as another
-    # argument, which is only valid if T_HAS_MEMORY_PRESSURE is set
-    CUSTOM_FUNC = lltype.FuncType([llmemory.Address], lltype.Void)
-    CUSTOM_FUNC_PTR = lltype.Ptr(CUSTOM_FUNC)
-    CUSTOM_DATA_STRUCT = lltype.Struct('custom_data',
-        ('customfunc', CUSTOM_FUNC_PTR),
-        ('memory_pressure_offset', lltype.Signed), # offset to where the amount
-                                           # of owned memory pressure is stored
-        )
-    CUSTOM_DATA_STRUCT_PTR = lltype.Ptr(CUSTOM_DATA_STRUCT)
+    # A custom tracer (CT), enumerates the addresses that contain GCREFs.
+    # It is called with the object as first argument, and the previous
+    # returned address (or NULL the first time) as the second argument.
+    FINALIZER_FUNC = lltype.FuncType([llmemory.Address], lltype.Void)
+    FINALIZER = lltype.Ptr(FINALIZER_FUNC)
 
     # structure describing the layout of a typeid
     TYPE_INFO = lltype.Struct("type_info",
         ("infobits",       lltype.Signed),    # combination of the T_xxx consts
-        ("customdata",     CUSTOM_DATA_STRUCT_PTR),
+        ("finalizer",      FINALIZER),
         ("fixedsize",      lltype.Signed),
         ("ofstoptrs",      lltype.Ptr(OFFSETS_TO_GC_PTR)),
         hints={'immutable': True},
@@ -89,20 +80,16 @@ class GCData(object):
     def q_cannot_pin(self, typeid):
         typeinfo = self.get(typeid)
         ANY = (T_HAS_GCPTR | T_IS_WEAKREF)
-        return (typeinfo.infobits & ANY) != 0 or bool(typeinfo.customdata)
+        return (typeinfo.infobits & ANY) != 0 or bool(typeinfo.finalizer)
 
-    def q_finalizer_handlers(self):
-        adr = self.finalizer_handlers   # set from framework.py or gcwrapper.py
-        return llmemory.cast_adr_to_ptr(adr, lltype.Ptr(FIN_HANDLER_ARRAY))
+    def q_finalizer(self, typeid):
+        return self.get(typeid).finalizer
 
-    def q_destructor_or_custom_trace(self, typeid):
-        if not self.get(typeid).customdata:
-            return lltype.nullptr(GCData.CUSTOM_FUNC_PTR.TO)
-        return self.get(typeid).customdata.customfunc
-
-    def q_is_old_style_finalizer(self, typeid):
+    def q_light_finalizer(self, typeid):
         typeinfo = self.get(typeid)
-        return (typeinfo.infobits & T_HAS_OLDSTYLE_FINALIZER) != 0
+        if typeinfo.infobits & T_HAS_LIGHTWEIGHT_FINALIZER:
+            return typeinfo.finalizer
+        return lltype.nullptr(GCData.FINALIZER_FUNC)
 
     def q_offsets_to_gc_pointers(self, typeid):
         return self.get(typeid).ofstoptrs
@@ -149,23 +136,13 @@ class GCData(object):
         infobits = self.get(typeid).infobits
         return infobits & T_ANY_SLOW_FLAG == 0
 
-    def q_has_memory_pressure(self, typeid):
-        infobits = self.get(typeid).infobits
-        return infobits & T_HAS_MEMORY_PRESSURE != 0
-
-    def q_get_memory_pressure_ofs(self, typeid):
-        infobits = self.get(typeid).infobits
-        assert infobits & T_HAS_MEMORY_PRESSURE != 0
-        return self.get(typeid).customdata.memory_pressure_offset
-
     def set_query_functions(self, gc):
         gc.set_query_functions(
             self.q_is_varsize,
             self.q_has_gcptr_in_varsize,
             self.q_is_gcarrayofgcptr,
-            self.q_finalizer_handlers,
-            self.q_destructor_or_custom_trace,
-            self.q_is_old_style_finalizer,
+            self.q_finalizer,
+            self.q_light_finalizer,
             self.q_offsets_to_gc_pointers,
             self.q_fixed_size,
             self.q_varsize_item_sizes,
@@ -178,9 +155,7 @@ class GCData(object):
             self.q_has_custom_trace,
             self.q_fast_path_tracing,
             self.q_has_gcptr,
-            self.q_cannot_pin,
-            self.q_has_memory_pressure,
-            self.q_get_memory_pressure_ofs)
+            self.q_cannot_pin)
 
     def _has_got_custom_trace(self, typeid):
         type_info = self.get(typeid)
@@ -195,11 +170,10 @@ T_IS_GCARRAY_OF_GCPTR       = 0x040000
 T_IS_WEAKREF                = 0x080000
 T_IS_RPYTHON_INSTANCE       = 0x100000 # the type is a subclass of OBJECT
 T_HAS_CUSTOM_TRACE          = 0x200000
-T_HAS_OLDSTYLE_FINALIZER    = 0x400000
+T_HAS_LIGHTWEIGHT_FINALIZER = 0x400000
 T_HAS_GCPTR                 = 0x1000000
-T_HAS_MEMORY_PRESSURE       = 0x2000000 # first field is memory pressure field
-T_KEY_MASK                  = intmask(0xFC000000) # bug detection only
-T_KEY_VALUE                 = intmask(0x58000000) # bug detection only
+T_KEY_MASK                  = intmask(0xFE000000) # bug detection only
+T_KEY_VALUE                 = intmask(0x5A000000) # bug detection only
 
 def _check_valid_type_info(p):
     ll_assert(p.infobits & T_KEY_MASK == T_KEY_VALUE, "invalid type_id")
@@ -214,25 +188,6 @@ def check_typeid(typeid):
     ll_assert(llop.is_group_member_nonzero(lltype.Bool, typeid),
               "invalid type_id")
 
-def has_special_memory_pressure(TYPE):
-    if TYPE._is_varsize():
-        return False
-    T = TYPE
-    while True:
-        if 'special_memory_pressure' in T._flds:
-            return True
-        if 'super' not in T._flds:
-            return False
-        T = T._flds['super']
-
-def get_memory_pressure_ofs(TYPE):
-    T = TYPE
-    while True:
-        if 'special_memory_pressure' in T._flds:
-            return llmemory.offsetof(T, 'special_memory_pressure')
-        if 'super' not in T._flds:
-            assert False, "get_ and has_memory_pressure disagree"
-        T = T._flds['super']    
 
 def encode_type_shape(builder, info, TYPE, index):
     """Encode the shape of the TYPE into the TYPE_INFO structure 'info'."""
@@ -243,18 +198,12 @@ def encode_type_shape(builder, info, TYPE, index):
         infobits |= T_HAS_GCPTR
     #
     fptrs = builder.special_funcptr_for_type(TYPE)
-    if fptrs or has_special_memory_pressure(TYPE):
-        customdata = lltype.malloc(GCData.CUSTOM_DATA_STRUCT, flavor='raw',
-                                   immortal=True)
-        info.customdata = customdata
-        if "destructor" in fptrs:
-            customdata.customfunc = fptrs["destructor"]
-        if "old_style_finalizer" in fptrs:
-            customdata.customfunc = fptrs["old_style_finalizer"]
-            infobits |= T_HAS_OLDSTYLE_FINALIZER
-        if has_special_memory_pressure(TYPE):
-            infobits |= T_HAS_MEMORY_PRESSURE
-            info.customdata.memory_pressure_offset = get_memory_pressure_ofs(TYPE)
+    if fptrs:
+        if "finalizer" in fptrs:
+            info.finalizer = fptrs["finalizer"]
+        if "light_finalizer" in fptrs:
+            info.finalizer = fptrs["light_finalizer"]
+            infobits |= T_HAS_LIGHTWEIGHT_FINALIZER
     #
     if not TYPE._is_varsize():
         info.fixedsize = llarena.round_up_for_allocation(
@@ -424,21 +373,21 @@ class TypeLayoutBuilder(object):
     def special_funcptr_for_type(self, TYPE):
         if TYPE in self._special_funcptrs:
             return self._special_funcptrs[TYPE]
-        fptr1, is_lightweight = self.make_destructor_funcptr_for_type(TYPE)
+        fptr1, is_lightweight = self.make_finalizer_funcptr_for_type(TYPE)
         fptr2 = self.make_custom_trace_funcptr_for_type(TYPE)
         result = {}
         if fptr1:
             if is_lightweight:
-                result["destructor"] = fptr1
+                result["light_finalizer"] = fptr1
             else:
-                result["old_style_finalizer"] = fptr1
+                result["finalizer"] = fptr1
         if fptr2:
             result["custom_trace"] = fptr2
         self._special_funcptrs[TYPE] = result
         return result
 
-    def make_destructor_funcptr_for_type(self, TYPE):
-        # must be overridden for proper destructor support
+    def make_finalizer_funcptr_for_type(self, TYPE):
+        # must be overridden for proper finalizer support
         return None, False
 
     def make_custom_trace_funcptr_for_type(self, TYPE):
@@ -597,9 +546,3 @@ def convert_weakref_to(targetptr):
         link = lltype.malloc(WEAKREF, immortal=True)
         link.weakptr = llmemory.cast_ptr_to_adr(targetptr)
         return link
-
-########## finalizers ##########
-
-FIN_TRIGGER_FUNC = lltype.FuncType([], lltype.Void)
-FIN_HANDLER_ARRAY = lltype.Array(('deque', llmemory.Address),
-                                 ('trigger', lltype.Ptr(FIN_TRIGGER_FUNC)))

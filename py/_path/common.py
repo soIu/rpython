@@ -1,10 +1,7 @@
 """
 """
-import os, sys, posixpath
+import os, sys
 import py
-
-# Moved from local.py.
-iswin32 = sys.platform == "win32" or (getattr(os, '_name', False) == 'nt')
 
 class Checkers:
     _depend_on_existence = 'exists', 'link', 'dir', 'file'
@@ -113,24 +110,22 @@ class PathBase(object):
     ext = property(ext, None, None, ext.__doc__)
 
     def dirpath(self, *args, **kwargs):
-        """ return the directory path joined with any given path arguments.  """
+        """ return the directory Path of the current Path joined
+            with any given path arguments.
+        """
         return self.new(basename='').join(*args, **kwargs)
-
-    def read_binary(self):
-        """ read and return a bytestring from reading the path. """
-        with self.open('rb') as f:
-            return f.read()
-
-    def read_text(self, encoding):
-        """ read and return a Unicode string from reading the path. """
-        with self.open("r", encoding=encoding) as f:
-            return f.read()
-
 
     def read(self, mode='r'):
         """ read and return a bytestring from reading the path. """
-        with self.open(mode) as f:
+        if sys.version_info < (2,3):
+            for x in 'u', 'U':
+                if x in mode:
+                    mode = mode.replace(x, '')
+        f = self.open(mode)
+        try:
             return f.read()
+        finally:
+            f.close()
 
     def readlines(self, cr=1):
         """ read and return a list of lines from the path. if cr is False, the
@@ -384,15 +379,6 @@ class FNMatcher:
 
     def __call__(self, path):
         pattern = self.pattern
-
-        if (pattern.find(path.sep) == -1 and
-        iswin32 and
-        pattern.find(posixpath.sep) != -1):
-            # Running on Windows, the pattern has no Windows path separators,
-            # and the pattern has one or more Posix path separators. Replace
-            # the Posix path separators with the Windows path separator.
-            pattern = pattern.replace(posixpath.sep, path.sep)
-
         if pattern.find(path.sep) == -1:
             name = path.basename
         else:

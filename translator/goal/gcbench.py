@@ -44,9 +44,8 @@
 #               - Results are sensitive to locking cost, but we dont
 #                 check for proper locking
 import time
-import gc
 
-USAGE = """gcbench [num_repetitions] [--depths=N,N,N..] [--threads=N] [--gc=off|--gc=manual]"""
+USAGE = """gcbench [num_repetitions] [--depths=N,N,N..] [--threads=N]"""
 ENABLE_THREADS = True
 
 
@@ -174,7 +173,6 @@ def entry_point(argv):
     depths = DEFAULT_DEPTHS
     threads = 0
     repeatcount = 1
-    gc_policy = 'on'
     for arg in argv[1:]:
         if arg.startswith('--threads='):
             arg = arg[len('--threads='):]
@@ -191,22 +189,13 @@ def entry_point(argv):
                 depths = [int(s) for s in arg]
             except ValueError:
                 return argerror()
-        elif arg.startswith('--gc=off'):
-            gc_policy = 'off'
-        elif arg.startswith('--gc=manual'):
-            gc_policy = 'manual'
         else:
             try:
                 repeatcount = int(arg)
             except ValueError:
                 return argerror()
-    #
-    if gc_policy == 'off' or gc_policy == 'manual':
-        gc.disable()
     for i in range(repeatcount):
         main(depths, threads)
-        if gc_policy == 'manual':
-            gc.collect(1)
     return 0
 
 

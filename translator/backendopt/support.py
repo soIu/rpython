@@ -1,9 +1,13 @@
+import py
+
 from rpython.rtyper.lltypesystem import lltype
 from rpython.rtyper.rmodel import inputconst
-from rpython.tool.ansi_print import AnsiLogger
+from rpython.tool.ansi_print import ansi_log
 from rpython.translator.simplify import get_graph
 
-log = AnsiLogger("backendopt")
+
+log = py.log.Producer("backendopt")
+py.log.setconsumer("backendopt", ansi_log)
 
 
 def graph_operations(graph):

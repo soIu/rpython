@@ -1,6 +1,5 @@
 import os, py
 from rpython.tool.udir import udir
-from rpython.rlib import rgc
 from rpython.rtyper.lltypesystem import lltype
 from rpython.rtyper.lltypesystem.lloperation import llop
 
@@ -53,7 +52,7 @@ class SemiSpaceGCTestDefines:
         def set_age_of(c, newvalue):
             # NB. this used to be a dictionary, but setting into a dict
             # consumes memory.  This has the effect that this test's
-            # finalizer_trigger method can consume more memory and potentially
+            # __del__ methods can consume more memory and potentially
             # cause another collection.  This would result in objects
             # being unexpectedly destroyed at the same 'state.time'.
             state.age[ord(c) - ord('a')] = newvalue
@@ -62,21 +61,12 @@ class SemiSpaceGCTestDefines:
             def __init__(self, key):
                 self.key = key
                 self.refs = []
-                fq.register_finalizer(self)
-
-        class FQ(rgc.FinalizerQueue):
-            Class = A
-            def finalizer_trigger(self):
+            def __del__(self):
                 from rpython.rlib.debug import debug_print
-                while True:
-                    a = self.next_dead()
-                    if a is None:
-                        break
-                    debug_print("DEL:", a.key)
-                    assert age_of(a.key) == -1
-                    set_age_of(a.key, state.time)
-                    state.progress = True
-        fq = FQ()
+                debug_print("DEL:", self.key)
+                assert age_of(self.key) == -1
+                set_age_of(self.key, state.time)
+                state.progress = True
 
         def build_example(input):
             state.time = 0
@@ -160,22 +150,11 @@ class SemiSpaceGCTestDefines:
         class B:
             count = 0
         class A:
-            pass
-
-        class FQ(rgc.FinalizerQueue):
-            Class = A
-            def finalizer_trigger(self):
-                while True:
-                    a = self.next_dead()
-                    if a is None:
-                        break
-                    a.b.count += 1
-        fq = FQ()
-
+            def __del__(self):
+                self.b.count += 1
         def g():
             b = B()
             a = A()
-            fq.register_finalizer(a)
             a.b = b
             i = 0
             lst = [None]

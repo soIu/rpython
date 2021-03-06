@@ -1,21 +1,19 @@
-import math
 from rpython.rtyper.lltypesystem.lltype import (Struct, Array, FixedSizeArray,
     FuncType, typeOf, GcStruct, GcArray, RttiStruct, ContainerType, parentlink,
     Void, OpaqueType, Float, RuntimeTypeInfo, getRuntimeTypeInfo, Char,
     _subarray)
 from rpython.rtyper.lltypesystem import llmemory, llgroup
-from rpython.translator.c.funcgen import make_funcgen
+from rpython.translator.c.funcgen import FunctionCodeGenerator
+from rpython.translator.c.external import CExternalFunctionCodeGenerator
 from rpython.translator.c.support import USESLOTS # set to False if necessary while refactoring
 from rpython.translator.c.support import cdecl, forward_cdecl, somelettersfrom
 from rpython.translator.c.support import c_char_array_constant, barebonearray
 from rpython.translator.c.primitive import PrimitiveType, name_signed
-from rpython.rlib import exports, objectmodel
-from rpython.rlib.rfloat import isfinite
+from rpython.rlib import exports
+from rpython.rlib.rfloat import isfinite, isinf
 
 
-def needs_gcheader(gctransformer, T):
-    if getattr(gctransformer, 'NO_HEADER', False):   # for boehm
-        return False
+def needs_gcheader(T):
     if not isinstance(T, ContainerType):
         return False
     if T._gckind != 'gc':
@@ -90,7 +88,7 @@ class StructDefNode(NodeWithDependencies):
         STRUCT = self.STRUCT
         if self.varlength is not None:
             self.normalizedtypename = db.gettype(STRUCT, who_asks=self)
-        if needs_gcheader(db.gctransformer, self.STRUCT):
+        if needs_gcheader(self.STRUCT):
             HDR = db.gcpolicy.struct_gcheader_definition(self)
             if HDR is not None:
                 gc_field = ("_gcheader", db.gettype(HDR, who_asks=self))
@@ -216,7 +214,7 @@ class ArrayDefNode(NodeWithDependencies):
         self.computegcinfo(db.gcpolicy)
         if self.varlength is not None:
             self.normalizedtypename = db.gettype(ARRAY, who_asks=self)
-        if needs_gcheader(db.gctransformer, ARRAY):
+        if needs_gcheader(ARRAY):
             HDR = db.gcpolicy.array_gcheader_definition(self)
             if HDR is not None:
                 gc_field = ("_gcheader", db.gettype(HDR, who_asks=self))
@@ -256,11 +254,8 @@ class ArrayDefNode(NodeWithDependencies):
             yield '\t' + cdecl(typename, fname) + ';'
         if not self.ARRAY._hints.get('nolength', False):
             yield '\tlong length;'
-        varlength = self.varlength
-        if varlength is not None:
-            varlength += self.ARRAY._hints.get('extra_item_after_alloc', 0)
         line = '%s;' % cdecl(self.itemtypename,
-                             'items[%s]' % deflength(varlength))
+                             'items[%s]' % deflength(self.varlength))
         if self.ARRAY.OF is Void:    # strange
             line = '/* array of void */'
             if self.ARRAY._hints.get('nolength', False):
@@ -503,14 +498,14 @@ class ContainerNode(Node):
             assert self.implementationtypename.startswith('struct ')
             assert self.implementationtypename.endswith(' @')
             uniontypename = 'union %su @' % self.implementationtypename[7:-2]
-            return uniontypename, self.name[:-2], True
+            return uniontypename, self.name[:-2]
         else:
-            return self.implementationtypename, self.name, False
+            return self.implementationtypename, self.name
 
     def forward_declaration(self):
         if llgroup.member_of_group(self.obj):
             return
-        type, name, is_union = self.get_declaration()
+        type, name = self.get_declaration()
         yield '%s;' % (
             forward_cdecl(type, name, self.db.standalone,
                           is_thread_local=self.is_thread_local(),
@@ -520,12 +515,12 @@ class ContainerNode(Node):
         if llgroup.member_of_group(self.obj):
             return []
         lines = list(self.initializationexpr())
-        type, name, is_union = self.get_declaration()
-        if is_union and len(lines) < 2:
+        type, name = self.get_declaration()
+        if name != self.name and len(lines) < 2:
             # a union with length 0
             lines[0] = cdecl(type, name, self.is_thread_local())
         else:
-            if is_union:
+            if name != self.name:
                 lines[0] = '{ ' + lines[0]    # extra braces around the 'a' part
                 lines[-1] += ' }'             # of the union
             lines[0] = '%s = %s' % (
@@ -545,16 +540,7 @@ assert not USESLOTS or '__dict__' not in dir(ContainerNode)
 class StructNode(ContainerNode):
     nodekind = 'struct'
     if USESLOTS:
-        __slots__ = ('gc_init',)
-
-    def __init__(self, db, T, obj):
-        ContainerNode.__init__(self, db, T, obj)
-        gct = self.db.gctransformer
-        if needs_gcheader(gct, T):
-            if gct is not None:
-                self.gc_init = gct.gcheader_initdata(self.obj)
-            else:
-                self.gc_init = None
+        __slots__ = ()
 
     def basename(self):
         T = self.getTYPE()
@@ -580,28 +566,19 @@ class StructNode(ContainerNode):
 
         data = []
 
-        if needs_gcheader(self.db.gctransformer, T):
-            data.append(('gcheader', self.gc_init))
+        if needs_gcheader(T):
+            gc_init = self.db.gcpolicy.struct_gcheader_initdata(self)
+            data.append(('gcheader', gc_init))
 
         for name in defnode.fieldnames:
             data.append((name, getattr(self.obj, name)))
-
-        if T._hints.get('remove_hash'):
-            # hack for rstr.STR and UNICODE: remove their .hash value
-            # and write 0 in the C sources, if we're using a non-default
-            # hash function.
-            if hasattr(self.db.translator, 'll_hash_string'):
-                i = 0
-                while data[i][0] != 'hash':
-                    i += 1
-                data[i] = ('hash', 0)
 
         # Reasonably, you should only initialise one of the fields of a union
         # in C.  This is possible with the syntax '.fieldname value' or
         # '.fieldname = value'.  But here we don't know which of the
         # fields need initialization, so XXX we pick the first one
         # arbitrarily.
-        if T._hints.get('union'):
+        if hasattr(T, "_hints") and T._hints.get('union'):
             data = data[0:1]
 
         if 'get_padding_drop' in T._hints:
@@ -613,8 +590,8 @@ class StructNode(ContainerNode):
             padding_drop = T._hints['get_padding_drop'](d)
         else:
             padding_drop = []
-        type, name, is_union = self.get_declaration()
-        if is_union and self.getvarlength() < 1 and len(data) < 2:
+        type, name = self.get_declaration()
+        if name != self.name and self.getvarlength() < 1 and len(data) < 2:
             # an empty union
             yield ''
             return
@@ -636,20 +613,55 @@ class StructNode(ContainerNode):
 
 assert not USESLOTS or '__dict__' not in dir(StructNode)
 
+class GcStructNodeWithHash(StructNode):
+    # for the outermost level of nested structures, if it has a _hash_cache_.
+    nodekind = 'struct'
+    if USESLOTS:
+        __slots__ = ()
+
+    def get_hash_typename(self):
+        return 'struct _hashT_%s @' % self.name
+
+    def forward_declaration(self):
+        T = self.getTYPE()
+        assert self.typename == self.implementationtypename  # no array part
+        hash_typename = self.get_hash_typename()
+        hash_offset = self.db.gctransformer.get_hash_offset(T)
+        yield '%s {' % cdecl(hash_typename, '')
+        yield '\tunion {'
+        yield '\t\t%s;' % cdecl(self.implementationtypename, 'head')
+        yield '\t\tchar pad[%s];' % name_signed(hash_offset, self.db)
+        yield '\t} u;'
+        yield '\tlong hash;'
+        yield '};'
+        yield '%s;' % (
+            forward_cdecl(hash_typename, '_hash_' + self.name,
+                          self.db.standalone, self.is_thread_local()),)
+        yield '#define %s _hash_%s.u.head' % (self.name, self.name)
+
+    def implementation(self):
+        hash_typename = self.get_hash_typename()
+        hash = self.db.gcpolicy.get_prebuilt_hash(self.obj)
+        assert hash is not None
+        lines = list(self.initializationexpr())
+        lines.insert(0, '%s = { {' % (
+            cdecl(hash_typename, '_hash_' + self.name,
+                  self.is_thread_local()),))
+        lines.append('}, %s /* hash */ };' % name_signed(hash, self.db))
+        return lines
+
+def gcstructnode_factory(db, T, obj):
+    if db.gcpolicy.get_prebuilt_hash(obj) is not None:
+        cls = GcStructNodeWithHash
+    else:
+        cls = StructNode
+    return cls(db, T, obj)
+
 
 class ArrayNode(ContainerNode):
     nodekind = 'array'
     if USESLOTS:
-        __slots__ = ('gc_init',)
-
-    def __init__(self, db, T, obj):
-        ContainerNode.__init__(self, db, T, obj)
-        gct = self.db.gctransformer
-        if needs_gcheader(gct, T):
-            if gct is not None:
-                self.gc_init = gct.gcheader_initdata(self.obj)
-            else:
-                self.gc_init = None
+        __slots__ = ()
 
     def getptrname(self):
         if barebonearray(self.getTYPE()):
@@ -668,8 +680,9 @@ class ArrayNode(ContainerNode):
     def initializationexpr(self, decoration=''):
         T = self.getTYPE()
         yield '{'
-        if needs_gcheader(self.db.gctransformer, T):
-            lines = generic_initializationexpr(self.db, self.gc_init, 'gcheader',
+        if needs_gcheader(T):
+            gc_init = self.db.gcpolicy.array_gcheader_initdata(self)
+            lines = generic_initializationexpr(self.db, gc_init, 'gcheader',
                                                '%sgcheader' % (decoration,))
             for line in lines:
                 yield line
@@ -757,7 +770,7 @@ def generic_initializationexpr(db, value, access_expr, decoration):
         comma = ','
         if typeOf(value) == Float and not isfinite(value):
             db.late_initializations.append(('%s' % access_expr, db.get(value)))
-            if math.isinf(value):
+            if isinf(value):
                 name = '-+'[value > 0] + 'inf'
             else:
                 name = 'NaN'
@@ -768,63 +781,81 @@ def generic_initializationexpr(db, value, access_expr, decoration):
                 comma = ''
         expr += comma
         i = expr.find('\n')
-        if i < 0:
-            i = len(expr)
+        if i<0: i = len(expr)
         expr = '%s\t/* %s */%s' % (expr[:i], decoration, expr[i:])
         return expr.split('\n')
 
 # ____________________________________________________________
 
 
-class FuncNodeBase(ContainerNode):
+class FuncNode(ContainerNode):
     nodekind = 'func'
     eci_name = 'compilation_info'
     # there not so many node of this kind, slots should not
     # be necessary
-    def __init__(self, db, T, obj, ptrname):
+
+    def __init__(self, db, T, obj, forcename=None):
         Node.__init__(self, db)
         self.globalcontainer = True
         self.T = T
         self.obj = obj
-        self.name = ptrname
+        callable = getattr(obj, '_callable', None)
+        if (callable is not None and
+            getattr(callable, 'c_name', None) is not None):
+            self.name = forcename or obj._callable.c_name
+        elif getattr(obj, 'external', None) == 'C' and not db.need_sandboxing(obj):
+            self.name = forcename or self.basename()
+        else:
+            self.name = (forcename or
+                         db.namespace.uniquename('g_' + self.basename()))
+        self.make_funcgens()
         self.typename = db.gettype(T)  #, who_asks=self)
 
     def getptrname(self):
         return self.name
 
+    def make_funcgens(self):
+        self.funcgens = select_function_code_generators(self.obj, self.db, self.name)
+        if self.funcgens:
+            argnames = self.funcgens[0].argnames()  #Assume identical for all funcgens
+            self.implementationtypename = self.db.gettype(self.T, argnames=argnames)
+            self._funccodegen_owner = self.funcgens[0]
+        else:
+            self._funccodegen_owner = None
+
     def basename(self):
         return self.obj._name
 
-
-class FuncNode(FuncNodeBase):
-    def __init__(self, db, T, obj, ptrname):
-        FuncNodeBase.__init__(self, db, T, obj, ptrname)
-        exception_policy = getattr(obj, 'exception_policy', None)
-        self.funcgen = make_funcgen(obj.graph, db, exception_policy, ptrname)
-        argnames = self.funcgen.argnames()
-        self.implementationtypename = db.gettype(T, argnames=argnames)
-        self._funccodegen_owner = self.funcgen
-
     def enum_dependencies(self):
-        return self.funcgen.allconstantvalues()
+        if not self.funcgens:
+            return []
+        return self.funcgens[0].allconstantvalues() #Assume identical for all funcgens
 
     def forward_declaration(self):
         callable = getattr(self.obj, '_callable', None)
         is_exported = getattr(callable, 'exported_symbol', False)
-        yield '%s;' % (
-            forward_cdecl(self.implementationtypename,
-                self.name, self.db.standalone, is_exported=is_exported))
-
-    def graphs_to_patch(self):
-        return self.funcgen.graphs_to_patch()
+        for funcgen in self.funcgens:
+            yield '%s;' % (
+                forward_cdecl(self.implementationtypename,
+                    funcgen.name(self.name), self.db.standalone,
+                    is_exported=is_exported))
 
     def implementation(self):
-        funcgen = self.funcgen
+        for funcgen in self.funcgens:
+            for s in self.funcgen_implementation(funcgen):
+                yield s
+
+    def graphs_to_patch(self):
+        for funcgen in self.funcgens:
+            for i in funcgen.graphs_to_patch():
+                yield i
+
+    def funcgen_implementation(self, funcgen):
         funcgen.implementation_begin()
         # recompute implementationtypename as the argnames may have changed
         argnames = funcgen.argnames()
         implementationtypename = self.db.gettype(self.T, argnames=argnames)
-        yield '%s {' % cdecl(implementationtypename, self.name)
+        yield '%s {' % cdecl(implementationtypename, funcgen.name(self.name))
         #
         # declare the local variables
         #
@@ -835,7 +866,7 @@ class FuncNode(FuncNodeBase):
         while start < len(localnames):
             # pack the local declarations over as few lines as possible
             total = lengths[start] + 8
-            end = start + 1
+            end = start+1
             while total + lengths[end] < 77:
                 total += lengths[end] + 1
                 end += 1
@@ -866,59 +897,51 @@ class FuncNode(FuncNodeBase):
         del bodyiter
         funcgen.implementation_end()
 
-class ExternalFuncNode(FuncNodeBase):
-    def __init__(self, db, T, obj, ptrname):
-        FuncNodeBase.__init__(self, db, T, obj, ptrname)
-        self._funccodegen_owner = None
+def sandbox_stub(fnobj, db):
+    # unexpected external function for --sandbox translation: replace it
+    # with a "Not Implemented" stub.  To support these functions, port them
+    # to the new style registry (e.g. rpython.module.ll_os.RegisterOs).
+    from rpython.translator.sandbox import rsandbox
+    graph = rsandbox.get_external_function_sandbox_graph(fnobj, db,
+                                                      force_stub=True)
+    return [FunctionCodeGenerator(graph, db)]
 
-    def enum_dependencies(self):
+def sandbox_transform(fnobj, db):
+    # for --sandbox: replace a function like os_open_llimpl() with
+    # code that communicates with the external process to ask it to
+    # perform the operation.
+    from rpython.translator.sandbox import rsandbox
+    graph = rsandbox.get_external_function_sandbox_graph(fnobj, db)
+    return [FunctionCodeGenerator(graph, db)]
+
+def select_function_code_generators(fnobj, db, functionname):
+    # XXX this logic is completely broken nowadays
+    #     _external_name does not mean that this is done oldstyle
+    sandbox = db.need_sandboxing(fnobj)
+    if hasattr(fnobj, '_external_name'):
+        if sandbox:
+            return sandbox_stub(fnobj, db)
+        db.externalfuncs[fnobj._external_name] = fnobj
         return []
-
-    def forward_declaration(self):
+    elif hasattr(fnobj, 'graph'):
+        if sandbox and sandbox != "if_external":
+            # apply the sandbox transformation
+            return sandbox_transform(fnobj, db)
+        exception_policy = getattr(fnobj, 'exception_policy', None)
+        return [FunctionCodeGenerator(fnobj.graph, db, exception_policy,
+                                      functionname)]
+    elif getattr(fnobj, 'external', None) is not None:
+        if sandbox:
+            return sandbox_stub(fnobj, db)
+        elif fnobj.external == 'C':
+            return []
+        else:
+            assert fnobj.external == 'CPython'
+            return [CExternalFunctionCodeGenerator(fnobj, db)]
+    elif hasattr(fnobj._callable, "c_name"):
         return []
-
-    def implementation(self):
-        return []
-
-def new_funcnode(db, T, obj, forcename=None):
-    from rpython.rtyper.rtyper import llinterp_backend
-    if db.sandbox:
-        if (getattr(obj, 'external', None) is not None and
-                not obj._safe_not_sandboxed):
-            from rpython.translator.sandbox import rsandbox
-            obj.__dict__['graph'] = rsandbox.get_sandbox_stub(
-                obj, db.translator.rtyper)
-            obj.__dict__.pop('_safe_not_sandboxed', None)
-            obj.__dict__.pop('external', None)
-    if forcename:
-        name = forcename
     else:
-        name = _select_name(db, obj)
-    if hasattr(obj, 'graph'):
-        return FuncNode(db, T, obj, name)
-    elif getattr(obj, 'external', None) is not None:
-        assert obj.external == 'C'
-        if db.sandbox:
-            assert obj._safe_not_sandboxed
-        return ExternalFuncNode(db, T, obj, name)
-    elif hasattr(obj._callable, "c_name"):
-        return ExternalFuncNode(db, T, obj, name)  # this case should only be used for entrypoints
-    elif db.translator.rtyper.backend is llinterp_backend:
-        # on llinterp, anything goes
-        return ExternalFuncNode(db, T, obj, name)
-    else:
-        raise ValueError("don't know how to generate code for %r" % (obj,))
-
-
-def _select_name(db, obj):
-    try:
-        return obj._callable.c_name
-    except AttributeError:
-        pass
-    if getattr(obj, 'external', None) == 'C':
-        return obj._name
-    return db.namespace.uniquename('g_' + obj._name)
-
+        raise ValueError("don't know how to generate code for %r" % (fnobj,))
 
 class ExtType_OpaqueNode(ContainerNode):
     nodekind = 'rpyopaque'
@@ -1024,11 +1047,11 @@ class GroupNode(ContainerNode):
 
 ContainerNodeFactory = {
     Struct:       StructNode,
-    GcStruct:     StructNode,
+    GcStruct:     gcstructnode_factory,
     Array:        ArrayNode,
     GcArray:      ArrayNode,
     FixedSizeArray: FixedSizeArrayNode,
-    FuncType:     new_funcnode,
+    FuncType:     FuncNode,
     OpaqueType:   opaquenode_factory,
     llmemory._WeakRefType: weakrefnode_factory,
     llgroup.GroupType: GroupNode,

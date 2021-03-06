@@ -1,24 +1,15 @@
 
 from rpython.translator.tool.graphpage import GraphPage
 from rpython.translator.tool.make_dot import DotGen
+from rpython.jit.metainterp.history import Box
 from rpython.jit.metainterp.resoperation import rop
 
 class SubGraph:
-    def __init__(self, op):
-        self.failargs = op.getfailargs()
-        self.subinputargs = op.getdescr()._debug_subinputargs
-        self.suboperations = op.getdescr()._debug_suboperations
+    def __init__(self, suboperations):
+        self.suboperations = suboperations
     def get_operations(self):
         return self.suboperations
-    def get_display_text(self, memo):
-        # copy the display of variables in this subgraph (a bridge)
-        # so that they match variables in the parent graph across the
-        # guard failure
-        for failarg, inputarg in zip(self.failargs, self.subinputargs):
-            try:
-                memo[inputarg] = memo[failarg]
-            except KeyError:
-                pass
+    def get_display_text(self):
         return None
 
 def display_procedures(procedures, errmsg=None, highlight_procedures={}, metainterp_sd=None):
@@ -27,7 +18,8 @@ def display_procedures(procedures, errmsg=None, highlight_procedures={}, metaint
     for graph, highlight in graphs:
         for op in graph.get_operations():
             if is_interesting_guard(op):
-                graphs.append((SubGraph(op), highlight))
+                graphs.append((SubGraph(op.getdescr()._debug_suboperations),
+                               highlight))
     graphpage = ResOpGraphPage(graphs, errmsg, metainterp_sd)
     graphpage.display()
 
@@ -66,7 +58,6 @@ class ResOpGen(object):
         self.errmsg = None
         self.target_tokens = {}
         self.metainterp_sd = metainterp_sd
-        self.memo = {}
 
     def op_name(self, graphindex, opindex):
         return 'g%dop%d' % (graphindex, opindex)
@@ -110,8 +101,13 @@ class ResOpGen(object):
         self.dotgen = DotGen('resop')
         self.dotgen.emit('clusterrank="local"')
         self.generrmsg()
-        for i, graph in enumerate(self.graphs):
-            self.gengraph(graph, i)
+        _prev = Box._extended_display
+        try:
+            Box._extended_display = False
+            for i, graph in enumerate(self.graphs):
+                self.gengraph(graph, i)
+        finally:
+            Box._extended_display = _prev
         # we generate the edges at the end of the file; otherwise, and edge
         # could mention a node before it's declared, and this can cause the
         # node declaration to occur too early -- in the wrong subgraph.
@@ -135,7 +131,7 @@ class ResOpGen(object):
         graphname = self.getgraphname(graphindex)
         if self.CLUSTERING:
             self.dotgen.emit('subgraph cluster%d {' % graphindex)
-        label = graph.get_display_text(self.memo)
+        label = graph.get_display_text()
         if label is not None:
             colorindex = self.highlight_graphs.get(graph, 0)
             if colorindex == 1:
@@ -169,9 +165,8 @@ class ResOpGen(object):
         opindex = opstartindex
         while True:
             op = operations[opindex]
-            op_repr = op.repr(self.memo, graytext=True)
-            if (op.getopnum() == rop.DEBUG_MERGE_POINT and
-                    self.metainterp_sd is not None):
+            op_repr = op.repr(graytext=True)
+            if op.getopnum() == rop.DEBUG_MERGE_POINT:
                 jd_sd = self.metainterp_sd.jitdrivers_sd[op.getarg(0).getint()]
                 if jd_sd._get_printable_location_ptr:
                     s = jd_sd.warmstate.get_location_str(op.getarglist()[3:])
@@ -208,12 +203,11 @@ class ResOpGen(object):
     def getlinks(self):
         boxes = {}
         for op in self.all_operations:
-            args = op.getarglist() + [op]
+            args = op.getarglist() + [op.result]
             for box in args:
-                s = box.repr_short(self.memo)
-                if len(s) > 1 and s[0] in 'irf' and s[1:].isdigit():
-                    boxes[box] = s
+                if getattr(box, 'is_box', False):
+                    boxes[box] = True
         links = {}
-        for box, s in boxes.items():
-            links.setdefault(s, (box.repr(self.memo), self.BOX_COLOR))
+        for box in boxes:
+            links[str(box)] = repr(box), self.BOX_COLOR
         return links

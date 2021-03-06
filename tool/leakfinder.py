@@ -1,10 +1,5 @@
 import sys, gc
-try:
-    import cStringIO
-except ImportError as e:
-    if sys.version_info.major > 2:
-        raise RuntimeError('use python 2 to run tests')
-    raise
+import cStringIO
 import traceback
 
 # Track allocations to detect memory leaks.
@@ -42,13 +37,13 @@ def start_tracking_allocations():
     ALLOCATED.clear()
     return result
 
-def stop_tracking_allocations(check, prev=None, do_collection=gc.collect):
+def stop_tracking_allocations(check, prev=None):
     global TRACK_ALLOCATIONS
     assert TRACK_ALLOCATIONS
     for i in range(5):
         if not ALLOCATED:
             break
-        do_collection()
+        gc.collect()
     result = ALLOCATED.copy()
     ALLOCATED.clear()
     if prev is None:

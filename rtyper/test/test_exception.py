@@ -48,7 +48,7 @@ class TestException(BaseRtypingTest):
         def f(n):
             try:
                 g(n)
-            except IOError as e:
+            except IOError, e:
                 assert e.errno == 0
                 assert e.strerror == "test"
                 assert e.filename is None
@@ -56,7 +56,7 @@ class TestException(BaseRtypingTest):
                 assert False
             try:
                 h(n)
-            except OSError as e:
+            except OSError, e:
                 assert e.errno == 42
                 assert e.strerror == "?"
                 assert e.filename is None
@@ -92,7 +92,7 @@ class TestException(BaseRtypingTest):
         def f(n):
             try:
                 assert n < 10
-            except MyError as operr:
+            except MyError, operr:
                 h(operr)
         res = self.interpret(f, [7])
         assert res is None
@@ -108,7 +108,7 @@ class TestException(BaseRtypingTest):
                 raise OperationError(next_instr)
             try:
                 raise BytecodeCorruption()
-            except OperationError as operr:
+            except OperationError, operr:
                 next_instr -= operr.a
         py.test.raises(LLException, self.interpret, f, [10])
 
@@ -124,7 +124,7 @@ class TestException(BaseRtypingTest):
                 raise OperationError(next_instr)
             try:
                 raise bcerr
-            except OperationError as operr:
+            except OperationError, operr:
                 next_instr -= operr.a
         py.test.raises(LLException, self.interpret, f, [10])
 

@@ -5,19 +5,6 @@ pytest_plugins = 'rpython.tool.pytest.expecttest'
 
 option = None
 
-try:
-    from hypothesis import settings
-except ImportError:
-    pass
-else:
-    try:
-        settings.register_profile('default', deadline=None)
-    except Exception:
-        import warnings
-        warnings.warn("Version of hypothesis too old, "
-                      "cannot set the deadline to None")
-    settings.load_profile('default')
-
 def braindead_deindent(self):
     """monkeypatch that wont end up doing stupid in the python tokenizer"""
     text = '\n'.join(self.lines)
@@ -53,45 +40,47 @@ def pytest_addoption(parser):
     group.addoption('--viewloops', action="store_true",
            default=False, dest="viewloops",
            help="show only the compiled loops")
-    group.addoption('--viewdeps', action="store_true",
-           default=False, dest="viewdeps",
-           help="show the dependencies that have been constructed from a trace")
 
 
-def pytest_addhooks(pluginmanager):
-    pluginmanager.register(LeakFinder())
+def pytest_pycollect_makeitem(__multicall__,collector, name, obj):
+    res = __multicall__.execute()
+    # work around pytest issue 251
+    import inspect
+    if res is None and inspect.isclass(obj) and \
+            collector.classnamefilter(name):
+        return py.test.collect.Class(name, parent=collector)
+    return res
+
+
+# XXX TODO: re-enable this when asmjs jit backend stops leaking
+#def pytest_addhooks(pluginmanager):
+#    pluginmanager.register(LeakFinder())
 
 class LeakFinder:
     """Track memory allocations during test execution.
 
     So far, only used by the function lltype.malloc(flavor='raw').
     """
-    @pytest.hookimpl(trylast=True)
-    def pytest_runtest_setup(self, item):
+    def pytest_runtest_setup(self, __multicall__, item):
+        __multicall__.execute()
         if not isinstance(item, py.test.collect.Function):
             return
         if not getattr(item.obj, 'dont_track_allocations', False):
             leakfinder.start_tracking_allocations()
 
-    @pytest.hookimpl(trylast=True)
-    def pytest_runtest_call(self, item):
+    def pytest_runtest_call(self, __multicall__, item):
+        __multicall__.execute()
         if not isinstance(item, py.test.collect.Function):
             return
         item._success = True
 
-    @pytest.hookimpl(trylast=True)
-    def pytest_runtest_teardown(self, item):
+    def pytest_runtest_teardown(self, __multicall__, item):
+        __multicall__.execute()
         if not isinstance(item, py.test.collect.Function):
             return
         if (not getattr(item.obj, 'dont_track_allocations', False)
             and leakfinder.TRACK_ALLOCATIONS):
-            kwds = {}
-            try:
-                kwds['do_collection'] = item.track_allocations_collect
-            except AttributeError:
-                pass
-            item._pypytest_leaks = leakfinder.stop_tracking_allocations(False,
-                                                                        **kwds)
+            item._pypytest_leaks = leakfinder.stop_tracking_allocations(False)
         else:            # stop_tracking_allocations() already called
             item._pypytest_leaks = None
 

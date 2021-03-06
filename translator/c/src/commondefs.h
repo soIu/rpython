@@ -58,23 +58,22 @@
 /******************** 32-bit support ********************/
 #if PYPY_LONG_BIT == 32
 
-#  if LONG_MAX != 2147483647L
+#  /*if LONG_MAX != 2147483647L
 #    error "error in LONG_MAX (32-bit sources but a 64-bit compiler?)"
 #  endif
 #  if LONG_MIN != -2147483647L-1L
 #    error "unsupported value for LONG_MIN"
-#  endif
+#  endif*/
 
 #  define SIZEOF_INT        4
 #  define SIZEOF_LONG       4
-#  define SIZEOF_SIGNED     4
 #  define SIZEOF_LONG_LONG  8
 
 /******************** 64-bit support ********************/
 #else
 
 #  ifndef _WIN64
-/*#    if LONG_MAX != 9223372036854775807L
+#    /*if LONG_MAX != 9223372036854775807L
 #      error "error in LONG_MAX (64-bit sources but a 32-bit compiler?)"
 #    endif
 #    if LONG_MIN != -9223372036854775807L-1L
@@ -83,21 +82,19 @@
 
 #    define SIZEOF_INT        4
 #    define SIZEOF_LONG       8
-#    define SIZEOF_SIGNED     8
 #    define SIZEOF_LONG_LONG  8
 
 /******************** Win-64 support ********************/
 #  else
-#    if LONG_MAX != 2147483647L
+#    /*if LONG_MAX != 2147483647L
 #      error "error in LONG_MAX (64-bit sources but incompatible compiler?)"
 #    endif
 #    if LONG_MIN != -2147483647L-1L
 #      error "unsupported value for LONG_MIN"
-#    endif
+#    endif*/
 
 #    define SIZEOF_INT        4
 #    define SIZEOF_LONG       4
-#    define SIZEOF_SIGNED     8
 #    define SIZEOF_LONG_LONG  8
 
 #  endif
@@ -111,8 +108,8 @@
 	  ((I) < 0 ? -1-((-1-(I)) >> (J)) : (I) >> (J))
 #elif ((-1) >> 1) == -1
 #  define Py_ARITHMETIC_RIGHT_SHIFT(TYPE, I, J) ((I) >> (J))
-#else
-#  error "uh? strange result"
+//#else
+//#  error "uh? strange result"
 #endif
 
 #define HAVE_LONG_LONG 1
@@ -122,4 +119,11 @@
 #ifndef MS_WINDOWS
 #  define MS_WINDOWS    /* a synonym */
 #endif
+#endif
+
+/* The smallest positive value that can be a valid object pointer. */
+#ifdef EMSCRIPTEN
+# define PYPY_POINTER_MIN 8
+#else
+# define PYPY_POINTER_MIN 8192
 #endif

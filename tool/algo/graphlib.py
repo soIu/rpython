@@ -6,10 +6,8 @@ Convention:
   'edges' is a dict mapping vertices to a list of edges with its source.
   Note that we can usually use 'edges' as the set of 'vertices' too.
 """
-from rpython.tool.ansi_print import AnsiLogger
 from rpython.tool.identity_dict import identity_dict
 
-log = AnsiLogger('graphlib')
 
 class Edge:
     def __init__(self, source, target):
@@ -27,27 +25,18 @@ def make_edge_dict(edge_list):
     return edges
 
 def depth_first_search(root, vertices, edges):
-    seen = set([root])
+    seen = {}
     result = []
-    stack = []
-    while True:
-        result.append(('start', root))
-        stack.append((root, iter(edges[root])))
-        while True:
-            vertex, iterator = stack[-1]
-            try:
-                edge = next(iterator)
-            except StopIteration:
-                stack.pop()
-                result.append(('stop', vertex))
-                if not stack:
-                    return result
-            else:
-                w = edge.target
-                if w in vertices and w not in seen:
-                    seen.add(w)
-                    root = w
-                    break
+    def visit(vertex):
+        result.append(('start', vertex))
+        seen[vertex] = True
+        for edge in edges[vertex]:
+            w = edge.target
+            if w in vertices and w not in seen:
+                visit(w)
+        result.append(('stop', vertex))
+    visit(root)
+    return result
 
 def vertices_reachable_from(root, vertices, edges):
     for event, v in depth_first_search(root, vertices, edges):
@@ -108,20 +97,13 @@ def all_cycles(root, vertices, edges):
             for edge in edges[v]:
                 if edge.target in vertices:
                     edgestack.append(edge)
-                    yield visit(edge.target)
+                    visit(edge.target)
                     edgestack.pop()
             stackpos[v] = None
         else:
             if stackpos[v] is not None:   # back-edge
                 result.append(edgestack[stackpos[v]:])
-
-    pending = [visit(root)]
-    while pending:
-        generator = pending[-1]
-        try:
-            pending.append(next(generator))
-        except StopIteration:
-            pending.pop()
+    visit(root)
     return result        
 
 
@@ -182,20 +164,14 @@ def is_acyclic(vertices, edges):
                 raise CycleFound
             if w in unvisited:
                 del unvisited[w]
-                yield visit(w)
+                visit(w)
         del visiting[vertex]
     try:
         unvisited = vertices.copy()
         while unvisited:
             visiting = {}
             root = unvisited.popitem()[0]
-            pending = [visit(root)]
-            while pending:
-                generator = pending[-1]
-                try:
-                    pending.append(next(generator))
-                except StopIteration:
-                    pending.pop()
+            visit(root)
     except CycleFound:
         return False
     else:
@@ -294,7 +270,6 @@ def break_cycles_v(vertices, edges):
             if root in roots_finished:
                 continue
             cycles = all_cycles(root, v_depths, edges)
-            log.dot()
             if not cycles:
                 roots_finished.add(root)
                 continue
