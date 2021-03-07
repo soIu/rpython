@@ -1,4 +1,4 @@
-from utils import enforceargs
+from rpython.rlib.objectmodel import enforceargs
 from .. import types
 
 #enforceargs(dict, types.function)

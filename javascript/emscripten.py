@@ -536,6 +536,8 @@ def args(function, asynchronous=False, name=None, count=None): #Spread list of O
 
 function = args
 
+snapshot = open(os.path.join(os.path.dirname(os.path.realpath(__file__)), 'utils/snapshot_memory.js'), 'r').read()
+
 #@function
 def garbage_collector(args):
     if globals.collector_id is None: return
