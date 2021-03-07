@@ -10,6 +10,8 @@ from rpython.rlib.rstring import replace
 JSON = json
 
 decompile = None
+tempfile = None
+imp = None
 try:
     import ast_decompiler
     import tempfile
@@ -514,11 +516,12 @@ def onfunctioncall(*arguments):
 
 #decorated_functions = []
 
-def args(function, asynchronous=False, name=None, count=None): #Spread list of Object to each of the argument
+def javascript_function(function=None, asynchronous=False, name=None, count=None): #Spread list of Object to each of the argument
     if asynchronous:
        def wrapper(function):
-           return args(asynchronous_function(function), name=function.__name__, count=function.func_code.co_argcount)
+           return javascript_function(function=asynchronous_function(function), name=function.__name__, count=function.func_code.co_argcount)
        return wrapper
+    if function is None: raise Exception("Where is the function?")
     if name is None: name = function.__name__
     if count is None: count = function.func_code.co_argcount
     args = ', '.join('args[%s]' % index for index in range(count))
@@ -536,6 +539,8 @@ def args(function, asynchronous=False, name=None, count=None): #Spread list of O
     #decorated_functions.append(function)
     return function
 
+args = javascript_function
+
 function = args
 
 snapshot = open(os.path.join(os.path.dirname(os.path.realpath(__file__)), 'utils/snapshot_memory.js'), 'r').read()
@@ -545,7 +550,12 @@ def garbage_collector(args):
     if globals.collector_id is None: return
     garbage = globals.garbage
     for variable in garbage: garbage[variable].free()
+    if globals.pendingAsync is None or not len(globals.pendingAsync):
+       if globals.snapshot is None:
+          globals.snapshot = Object(snapshot).keep()
+       globals.setTimeout(globals.snapshot.toRef(), JSON.fromInteger(0))
     globals.collector_id = None
+
 
 def run_garbage_collector():
     globals.collector_id = ''
@@ -658,6 +668,8 @@ class Globals:
     collector_id = None
     collector_function = None
     setTimeout = None
+    snapshot = None
+    pendingAsync = None
 
     def __init__(self):
         self.resolve_next_event = resolve_next_event
@@ -903,6 +915,9 @@ def asynchronous(function):
             promise.parent = self
             promise.args = args
             promise.id = self.count
+            if globals.pendingAsync is None:
+               globals.pendingAsync = {}
+            globals.pendingAsync[str(promise.parent.id) + ':' + str(promise.id)] = True
             self.count += 1
             self.promises[promise.id] = promise
             result = self.function(promise, promise.wait, *args)
@@ -933,6 +948,8 @@ def asynchronous(function):
         def resolve(self, value):
             self.waitable.object['resolved'] = True
             self.value = value
+            if globals.pendingAsync is not None and (str(self.parent.id) + ':' + str(self.id)) in globals.pendingAsync:
+               del globals.pendingAsync[str(self.parent.id) + ':' + str(self.id)]
             if self.waitable.parent_id == -1: return
             globals.resolve_next_event(str(self.waitable.parent_id), str(self.waitable.promise_id))
 
@@ -1015,7 +1032,7 @@ def asynchronous(function):
            return_object = current_elif.body[-1]
            objects = current_elif.body[0:-1]
            for variable in last_variables:
-               objects.append(ast.parse('if isinstance({0}, Object): {0}.release()'.format(variable)).body[0])
+               objects.append(ast.parse('if isinstance({0}, RPYObject): {0}.release()'.format(variable)).body[0])
            objects.append(return_object)
            current_elif.body = objects
            #last_variables = None
@@ -1031,7 +1048,7 @@ if isinstance({0}, tuple) and len({0}) == 99 and {0}[0] is not None:
    {0}[0].promise_id, {0}[0].parent_id = rpython_promise.id, rpython_promise.parent.id
    rpython_promise.promise_{0} = {0}
 else:
-   if isinstance({0}, Object): {0}.keep()
+   if isinstance({0}, RPYObject): {0}.keep()
    rpython_promise.var_{0} = {0}
                   '''.format(variable)).body[0])
               #objects.append(ast.parse(get_variables_cache(variables) + ' = ' + get_variables_name(variables)).body[0])
@@ -1068,7 +1085,7 @@ else:
         """ % (promise.parent.id, promise.id, '[' + ', '.join(['"%s"' % object.variable for object in promise.awaits]) + ']'))'''
     namespace = {}
     namespace.update(function_globals)
-    namespace.update({'rpython_next_event': rpython_next_event, 'globals': globals, 'Object': Object, 'rpython_keep_object': keep_object, 'rpython_dummy_tuple': dummy_tuple}) #, 'Wait': Wait})
+    namespace.update({'rpython_next_event': rpython_next_event, 'rpython_globals': globals, 'RPYObject': Object, 'Object': Object, 'rpython_keep_object': keep_object, 'rpython_dummy_tuple': dummy_tuple}) #, 'Wait': Wait})
     if decompile is None: exec(code, namespace)
     else:
        code.__dict__.update(namespace)
@@ -1084,8 +1101,18 @@ else:
     template = handler_template
     indent = ' ' * 4
     for index in range(globals.promises):
-        template += indent + "elif parent_id == '%s': int(child_id) in globals.promise_%s.promises and globals.promise_%s.promises[int(child_id)].next()\n" % (index, index, index)
-    exec(template, namespace)
+        template += indent + "elif parent_id == '%s': int(child_id) in rpython_globals.promise_%s.promises and rpython_globals.promise_%s.promises[int(child_id)].next()\n" % (index, index, index)
+    if decompile is None:
+       exec(template, namespace)
+    else:
+       fd, path = tempfile.mkstemp()
+       file = open(path, 'w')
+       file.write(template)
+       file.seek(0)
+       file.close()
+       module = imp.load_source(path, path)
+       module.__dict__.update(namespace)
+       namespace['resolve_next_event'] = module.resolve_next_event
     globals.resolve_next_event = namespace['resolve_next_event']
     entry = promise.entry
     def wrapper(*args):
