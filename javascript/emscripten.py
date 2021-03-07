@@ -887,6 +887,7 @@ def asynchronous(function):
         parent = None
         wait = None
         function_name = function.__name__
+        next_called = False
 
         def __init__(self, function, last):
             self.awaits = []
@@ -904,7 +905,9 @@ def asynchronous(function):
             promise.id = self.count
             self.count += 1
             self.promises[promise.id] = promise
-            self.function(promise, promise.wait, *args)
+            result = self.function(promise, promise.wait, *args)
+            if not promise.next_called and not promise.waitable.object['resolved']:
+               promise.resolve(result)
             return promise.waitable
 
         def next(self):
@@ -913,10 +916,13 @@ def asynchronous(function):
                 if not object.resolved: return
             for native in self.native_awaits:
                 if not native['resolved']: return
+            self.next_called = False
             self.native_awaits = []
             self.awaits = []
             self.step += 1
-            self.function(self, self.wait, *self.args)
+            result = self.function(self, self.wait, *self.args)
+            if not self.next_called and not self.waitable.object['resolved']:
+               self.resolve(result)
             #Maybe returns here too to catch promise chain
 
         def wait(self, awaits=[], native=[]):
@@ -1035,6 +1041,7 @@ else:
     #code.body[0] = new_function
     code = compile(code, filename='', mode='exec') if decompile is None else decompile(code, original_file, inspect.getsourcelines(original_function)[1])
     def rpython_next_event(promise):
+        promise.next_called = True
         if promise.native_awaits:
            resolved_all = True
            for object in promise.native_awaits:
