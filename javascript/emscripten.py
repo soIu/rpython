@@ -1,5 +1,6 @@
 import inspect
 import ast
+import os
 from rpython.javascript import json
 from rpython.rtyper.lltypesystem import lltype, rffi
 from rpython.translator.tool.cbuild import ExternalCompilationInfo
