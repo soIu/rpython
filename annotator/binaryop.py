@@ -662,6 +662,9 @@ class __extend__(pairtype(SomeInstance, SomeInstance)):
         else:
             basedef = ins1.classdef.commonbase(ins2.classdef)
             if basedef is None:
+                print "\n\nUnionError will be thrown, basically there are 2 or more classes that are on a same context (variable, function args, or function return) that aren't compatible. Here are their __dict__:"
+                print '\n', ins1.classdef.classdesc.classdict
+                print '\n', ins2.classdef.classdesc.classdict, '\n'
                 raise UnionError(ins1, ins2, "RPython cannot unify instances "
                         "with no common base class")
         flags = ins1.flags

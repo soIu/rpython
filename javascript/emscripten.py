@@ -16,6 +16,7 @@ try:
     import imp
     def decompile(code, original, lineno):
         if original.endswith('.pyc'): original = original[0:-1]
+        object_id = hex(id(code))
         code = ast_decompiler.decompile(code)
         fd, path = tempfile.mkstemp()
         file = open(path, 'w')
@@ -23,7 +24,7 @@ try:
         file.seek(0)
         file.close()
         #name = path.split('/')[-1]
-        module = imp.load_source('', path)
+        module = imp.load_source(object_id, path)
         return module
 except:
     pass
@@ -885,6 +886,7 @@ def asynchronous(function):
         count = 0
         parent = None
         wait = None
+        function_name = function.__name__
 
         def __init__(self, function, last):
             self.awaits = []
@@ -1027,12 +1029,12 @@ else:
    rpython_promise.var_{0} = {0}
                   '''.format(variable)).body[0])
               #objects.append(ast.parse(get_variables_cache(variables) + ' = ' + get_variables_name(variables)).body[0])
-           objects.append(ast.parse('next_event(rpython_promise)').body[0])
+           objects.append(ast.parse('rpython_next_event(rpython_promise)').body[0])
         current_elif = current_elif.orelse[0]
     #new_function.body += function.body
     #code.body[0] = new_function
     code = compile(code, filename='', mode='exec') if decompile is None else decompile(code, original_file, inspect.getsourcelines(original_function)[1])
-    def next_event(promise):
+    def rpython_next_event(promise):
         if promise.native_awaits:
            resolved_all = True
            for object in promise.native_awaits:
@@ -1059,7 +1061,7 @@ else:
         """ % (promise.parent.id, promise.id, '[' + ', '.join(['"%s"' % object.variable for object in promise.awaits]) + ']'))'''
     namespace = {}
     namespace.update(function_globals)
-    namespace.update({'next_event': next_event, 'globals': globals, 'Object': Object, 'rpython_keep_object': keep_object, 'rpython_dummy_tuple': dummy_tuple}) #, 'Wait': Wait})
+    namespace.update({'rpython_next_event': rpython_next_event, 'globals': globals, 'Object': Object, 'rpython_keep_object': keep_object, 'rpython_dummy_tuple': dummy_tuple}) #, 'Wait': Wait})
     if decompile is None: exec(code, namespace)
     else:
        code.__dict__.update(namespace)
