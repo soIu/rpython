@@ -842,9 +842,10 @@ class Object:
 
     def log(self):
         run_javascript('console.log(global.%s)' % (self.variable))
+        return self
 
     def wait(self, awaits, native_awaits):
-        self.resolved = False
+        self.resolved = True if self['then'].type != 'function' else False #False
         awaits.append(self)
         return self
 
@@ -931,6 +932,7 @@ def asynchronous(function):
                 if not object.resolved: return
             for native in self.native_awaits:
                 if not native['resolved']: return
+            for object in self.awaits: object.release()
             self.next_called = False
             self.native_awaits = []
             self.awaits = []
@@ -941,6 +943,8 @@ def asynchronous(function):
             #Maybe returns here too to catch promise chain
 
         def wait(self, awaits=[], native=[]):
+            for object in awaits:
+                object.keep()
             self.awaits = awaits
             self.native_awaits = native
             #return self.awaits, self.native_awaits
@@ -948,6 +952,7 @@ def asynchronous(function):
         def resolve(self, value):
             self.waitable.object['resolved'] = True
             self.value = value
+            for object in self.awaits: object.release()
             if globals.pendingAsync is not None and (str(self.parent.id) + ':' + str(self.id)) in globals.pendingAsync:
                del globals.pendingAsync[str(self.parent.id) + ':' + str(self.id)]
             if self.waitable.parent_id == -1: return
@@ -1033,6 +1038,7 @@ def asynchronous(function):
            objects = current_elif.body[0:-1]
            for variable in last_variables:
                objects.append(ast.parse('if isinstance({0}, RPYObject): {0}.release()'.format(variable)).body[0])
+               #objects.append(ast.parse('if isinstance({0}, RPYObject): {0}.release()\nelif isinstance({0}, rpython_list) and len({0}) and isinstance({0}[0], RPYObject):\n    for rpyobject_item in {0}: rpyobject_item.release()'.format(variable)).body[0])
            objects.append(return_object)
            current_elif.body = objects
            #last_variables = None
@@ -1085,7 +1091,7 @@ else:
         """ % (promise.parent.id, promise.id, '[' + ', '.join(['"%s"' % object.variable for object in promise.awaits]) + ']'))'''
     namespace = {}
     namespace.update(function_globals)
-    namespace.update({'rpython_next_event': rpython_next_event, 'rpython_globals': globals, 'RPYObject': Object, 'Object': Object, 'rpython_keep_object': keep_object, 'rpython_dummy_tuple': dummy_tuple}) #, 'Wait': Wait})
+    namespace.update({'rpython_next_event': rpython_next_event, 'rpython_globals': globals, 'RPYObject': Object, 'rpython_keep_object': keep_object, 'rpython_dummy_tuple': dummy_tuple, 'rpython_list': list}) #, 'Wait': Wait})
     if decompile is None: exec(code, namespace)
     else:
        code.__dict__.update(namespace)
