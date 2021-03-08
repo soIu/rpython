@@ -20,7 +20,7 @@ try:
         if original.endswith('.pyc'): original = original[0:-1]
         object_id = hex(id(code))
         code = ast_decompiler.decompile(code)
-        fd, path = tempfile.mkstemp()
+        fd, path = tempfile.mkstemp(dir=os.getenv('PYPY_USESSION_DIR'))
         file = open(path, 'w')
         file.write('\n'.join([line + ' #File ' + original + ':' + str(lineno) for line in code.splitlines()]))
         file.seek(0)
@@ -1105,7 +1105,7 @@ else:
     if decompile is None:
        exec(template, namespace)
     else:
-       fd, path = tempfile.mkstemp()
+       fd, path = tempfile.mkstemp(dir=os.getenv('PYPY_USESSION_DIR'))
        file = open(path, 'w')
        file.write(template)
        file.seek(0)
