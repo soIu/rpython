@@ -886,6 +886,10 @@ def asynchronous(function):
     class Waitable(Wait):
 
         rpython_promise = None
+        native_map = None
+        native_index = -1
+        native_values = None
+        native_values_count = 0
 
         def wait(self, awaits, native_awaits):
             native_awaits.append(self.object)
@@ -942,11 +946,24 @@ def asynchronous(function):
                self.resolve(result)
             #Maybe returns here too to catch promise chain
 
-        def wait(self, awaits=[], native=[]):
-            for object in awaits:
-                object.keep()
-            self.awaits = awaits
-            self.native_awaits = native
+        def wait(self, awaits=None, native=None):
+            if awaits is not None:
+               for object in awaits:
+                   object.keep()
+            self.awaits = awaits if awaits is not None else []
+            self.native_awaits = [item.object for item in native] if native is not None else []
+            if native is not None:
+               values = []
+               map = {}
+               for index, object in enumerate(native):
+                   object.promise_id = self.id
+                   object.parent_id = self.parent.id
+                   object.native_map = map
+                   object.native_index = index
+                   object.native_values = values
+                   object.native_values_count = len(native)
+               return values
+            return []
             #return self.awaits, self.native_awaits
 
         def resolve(self, value):
@@ -956,6 +973,11 @@ def asynchronous(function):
             if globals.pendingAsync is not None and (str(self.parent.id) + ':' + str(self.id)) in globals.pendingAsync:
                del globals.pendingAsync[str(self.parent.id) + ':' + str(self.id)]
             if self.waitable.parent_id == -1: return
+            if self.waitable.native_values is not None and self.waitable.native_map is not None:
+               self.waitable.native_map[self.waitable.native_index] = self.value
+               if len(self.waitable.native_map) == self.waitable.native_values_count:
+                  for index in range(self.waitable.native_values_count):
+                      self.waitable.native_values[index] = self.waitable.native_map[index]
             globals.resolve_next_event(str(self.waitable.parent_id), str(self.waitable.promise_id))
 
     source = inspect.getsource(function)
