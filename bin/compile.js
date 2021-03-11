@@ -73,7 +73,7 @@ if (process.argv[2] && process.argv[2].indexOf('.py') !== -1) {
   if (platform === 'win32') make = make.replace('RPYDIR = ', 'RPYDIR = "' + rpydir + '"#')
   make = make.replace(/-lutil/g, '');
   make = make.replace(/--export-all-symbols/g, '--export-dynamic');
-  make = make.replace('CC = ', 'CC = ' + emcc + ' -s ALLOW_MEMORY_GROWTH=1' + (debug_flag ? ' -g4' : '') + ' #');
+  make = make.replace('CC = ', 'CC = ' + emcc + ' -s ALLOW_MEMORY_GROWTH=1' + (debug_flag ? ' -g3' : '') + ' #');
   make = make.replace('TARGET = ', 'TARGET = ' + file + '.js #');
   make = make.replace('DEFAULT_TARGET = ', 'DEFAULT_TARGET = ' + file + '.js #');
   fs.writeFileSync(makefile, make);
@@ -89,7 +89,7 @@ if (process.argv[2] && process.argv[2].indexOf('.py') !== -1) {
   }
   try {
     fs.appendFileSync(path.join(process.cwd(), file + '.js' ), '\n' + deserialize_rpython_json.toString() + '\nModule.wasmMemory = wasmMemory;\nvar rpyGlobalArg = {"Module": Module, "deserialize_rpython_json": deserialize_rpython_json};\nrpyGlobalArg.global = rpyGlobalArg;\n if (typeof window !== "undefined") rpyGlobalArg.window = window;\n if (typeof require !== "undefined") rpyGlobalArg.require = require;\n if (typeof self !== "undefined") rpyGlobalArg.self = self;');
-    if (debug_flag) {
+    /*if (debug_flag) {
       var source_map = JSON.parse(require('fs').readFileSync(path.join(directory, file + '.wasm.map')));
       source_map.sources.forEach(function (filename, index) {
         var basename = path.basename(filename);
@@ -97,7 +97,7 @@ if (process.argv[2] && process.argv[2].indexOf('.py') !== -1) {
         if (basename !== filename) source_map.sources[index] = basename;
       });
       fs.writeFileSync(path.join(process.cwd(), file + '.wasm.map'), JSON.stringify(source_map));
-    }
+    }*/
     try {
       fs.rmdirSync(tempdir, {recursive: true});
     }
