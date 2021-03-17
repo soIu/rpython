@@ -60,6 +60,7 @@ if (!check_exist('make -v', true)) throw new Error('make (usually comes from bui
 if (!check_exist(emcc + ' -v', true)) throw new Error('emcc (comes with emsdk) must be installed and exist on PATH');
 var tempdir = path.join(os.tmpdir(), 'rpython-' + (new Date()).getTime());
 fs.mkdirSync(tempdir);
+process.env.RPYTHON_TARGET_FILE = process.argv[2];
 process.env.PYPY_USESSION_DIR = platform === 'win32' ? cygpath(tempdir) : tempdir;
 process.env.USER = 'current';
 child_process.execSync([python, rpython, '--gc=none', '--no-translation-jit', '-s'].concat(process.argv.slice(2)).join(' '), {stdio: 'inherit', env: process.env});
