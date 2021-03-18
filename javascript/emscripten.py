@@ -77,7 +77,7 @@ EM_JS(const char*, run_safe_get, (const char* variable, const char* key, const c
     console.error('Trying to get variable ' + variable + ' and ' + key);
     throw error;
   }
-  object = typeof object != 'function' || object.prototype ? object : object.bind(global[variable]);
+  if (typeof object === function && (!object.prototype || Object.getOwnPropertyNames(object.prototype).length === 1)) object = object.bind(global[variable]);
   global[new_variable] = object;
   var type;
   if (object === null) type = 'null';
