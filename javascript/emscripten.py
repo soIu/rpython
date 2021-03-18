@@ -530,10 +530,15 @@ def javascript_function(function=None, asynchronous=False, name=None, count=None
     indent = '\n' + (' ' * 4)
     #code = 'def ' + name + '(args=None' + (', ' if count else "") + arg_names + '):
     code = 'def ' + name + '(' + arg_names + (', ' if count else "") + 'args=None):'
-    if count: code += indent + 'if args is None: return rpython_decorated_function(' + ', '.join('rpyarg%s or RPYObject("null")' % (index + 1) for index in range(count)) + ')'
-    code += indent + 'if args is not None and len(args) < ' + str(count) + ': return rpython_decorated_function(' + ', '.join('args[%s] if len(args) >= %s else RPYObject("null")' % (index, index + 1) for index in range(count))  + ')'
+    def return_if_synchronous(): return 'return ' if not asynchronous else ""
+    if count:
+       code += indent + 'if args is None: ' + return_if_synchronous() + 'rpython_decorated_function(' + ', '.join('rpyarg%s or RPYObject("null")' % (index + 1) for index in range(count)) + ')'
+       if asynchronous: code += indent + 'if args is None: return'
+    code += indent + 'if args is not None and len(args) < ' + str(count) + ': ' + return_if_synchronous() + 'rpython_decorated_function(' + ', '.join('args[%s] if len(args) >= %s else RPYObject("null")' % (index, index + 1) for index in range(count))  + ')'
+    if asynchronous:
+       code += indent + 'if args is not None and len(args) < ' + str(count) + ': return'
     code += indent + 'assert args is not None and len(args) >= ' + str(count)
-    code += indent + ('return ' if not asynchronous else "") + 'rpython_decorated_function(' + args + ')'
+    code += indent + return_if_synchronous() + 'rpython_decorated_function(' + args + ')'
     exec(code, namespace)
     function = namespace[name]
     #decorated_functions.append(function)
