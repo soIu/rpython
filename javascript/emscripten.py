@@ -196,6 +196,7 @@ EM_JS(void, run_safe_promise, (const char* parent_promise_id, const char* promis
       throw error;
     }
     var object = await promise;
+    if (object && object.then) object.rpython_resolved = true;
     global[variable] = object;
   })).then(function () {
     Module.asm.onresolve(...args);
@@ -850,14 +851,14 @@ class Object:
         return self
 
     def wait(self, awaits, native_awaits):
-        self.resolved = True if self['then'].type != 'function' else False #False
+        self.resolved = True if self.type in ['null', 'undefined'] or self['then'].type != 'function' else False #False
         awaits.append(self)
         return self
 
     def _update(self):
         self.type = run_safe_type_update(self.variable)
         #self.type = run_javascript(String("if (global.{0} === null) {return 'null'} else if (Array.isArray(global.{0})) {return 'array'} else return typeof global.{0}").replace('{0}', self.variable).value, returns=True)
-        self.resolved = True if self['then'].type != 'function' else False
+        self.resolved = True if self.type in ['null', 'undefined'] or self['then'].type != 'function' else False if self['rpython_resolved'].type != 'boolean' else True
 
 class Wait:
 
