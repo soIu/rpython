@@ -850,7 +850,7 @@ class Object:
         run_javascript('console.log(global.%s)' % (self.variable))
         return self
 
-    def wait(self, awaits, native_awaits):
+    def wait(self, awaits, native_awaits, promise_id, parent_id):
         self.resolved = True if self.type in ['null', 'undefined'] or self['then'].type != 'function' else False #False
         awaits.append(self)
         return self
@@ -899,7 +899,9 @@ def asynchronous(function):
         function_name = function.__name__
         function_module = function.__module__
 
-        def wait(self, awaits, native_awaits):
+        def wait(self, awaits, native_awaits, promise_id, parent_id):
+            self.promise_id = promise_id
+            self.parent_id = parent_id
             native_awaits.append(self.object)
             return (self, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,)
 
@@ -1006,7 +1008,7 @@ def asynchronous(function):
     #if '(self' in source.split('\n')[first_line]: source = source.replace('def ' + name + '(self', 'def ' + name + '(self, rpython_promise, wait, ', 1)
     #else:
     source = source.replace('def ' + name + '(', 'def ' + name + '(rpython_promise, wait, ', 1)
-    source = source.replace('.wait()', '.wait(rpython_promise.awaits, rpython_promise.native_awaits)')
+    source = source.replace('.wait()', '.wait(rpython_promise.awaits, rpython_promise.native_awaits, rpython_promise.id, rpython_promise.parent.id)')
     #print source
     #source = promise_source + '\n' + source
     code = ast.parse(source)
@@ -1080,9 +1082,9 @@ def asynchronous(function):
               last_variables += variables
               variables = last_variables
               for variable in variables:
+#   {0}[0].promise_id, {0}[0].parent_id = rpython_promise.id, rpython_promise.parent.id
                   objects.append(ast.parse('''
 if isinstance({0}, tuple) and len({0}) == 99 and {0}[0] is not None:
-   {0}[0].promise_id, {0}[0].parent_id = rpython_promise.id, rpython_promise.parent.id
    rpython_promise.promise_{0} = {0}
 else:
    if isinstance({0}, RPYObject): {0}.keep()

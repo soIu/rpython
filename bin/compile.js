@@ -100,6 +100,7 @@ if (process.argv[2] && process.argv[2].indexOf('.py') !== -1) {
       });
       fs.writeFileSync(path.join(process.cwd(), file + '.wasm.map'), JSON.stringify(source_map));
     }
+    if (process.argv.indexOf('--keep-temp') !== -1) process.exit();
     try {
       fs.rmdirSync(tempdir, {recursive: true});
     }
