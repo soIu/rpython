@@ -890,6 +890,7 @@ def asynchronous(function):
         native_index = -1
         native_values = None
         native_values_count = 0
+        function_name = function.__name__
 
         def wait(self, awaits, native_awaits):
             native_awaits.append(self.object)
@@ -1143,9 +1144,9 @@ else:
        namespace['resolve_next_event'] = module.resolve_next_event
     globals.resolve_next_event = namespace['resolve_next_event']
     entry = promise.entry
-    def wrapper(*args):
+    def async_wrapper(*args):
         return entry(*args)
-    return wrapper
+    return async_wrapper
 
 asynchronous_function = asynchronous
 
