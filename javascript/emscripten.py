@@ -517,9 +517,9 @@ def onfunctioncall(*arguments):
 #decorated_functions = []
 
 def javascript_function(function=None, asynchronous=False, name=None, count=None): #Spread list of Object to each of the argument
-    if asynchronous:
+    if not function and asynchronous:
        def wrapper(function):
-           return javascript_function(function=asynchronous_function(function), name=function.__name__, count=function.func_code.co_argcount)
+           return javascript_function(function=asynchronous_function(function), name=function.__name__, count=function.func_code.co_argcount, asynchronous=True)
        return wrapper
     if function is None: raise Exception("Where is the function?")
     if name is None: name = function.__name__
@@ -533,7 +533,7 @@ def javascript_function(function=None, asynchronous=False, name=None, count=None
     if count: code += indent + 'if args is None: return rpython_decorated_function(' + ', '.join('rpyarg%s or RPYObject("null")' % (index + 1) for index in range(count)) + ')'
     code += indent + 'if args is not None and len(args) < ' + str(count) + ': return rpython_decorated_function(' + ', '.join('args[%s] if len(args) >= %s else RPYObject("null")' % (index, index + 1) for index in range(count))  + ')'
     code += indent + 'assert args is not None and len(args) >= ' + str(count)
-    code += indent + 'return rpython_decorated_function(' + args + ')'
+    code += indent + ('return ' if not asynchronous else "") + 'rpython_decorated_function(' + args + ')'
     exec(code, namespace)
     function = namespace[name]
     #decorated_functions.append(function)
