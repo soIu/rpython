@@ -891,6 +891,7 @@ def asynchronous(function):
         native_values = None
         native_values_count = 0
         function_name = function.__name__
+        function_module = function.__module__
 
         def wait(self, awaits, native_awaits):
             native_awaits.append(self.object)
@@ -904,8 +905,9 @@ def asynchronous(function):
         count = 0
         parent = None
         wait = None
-        function_name = function.__name__
         next_called = False
+        function_name = function.__name__
+        function_module = function.__module__
 
         def __init__(self, function, last):
             self.awaits = []
