@@ -53,6 +53,7 @@ EM_JS(const char*, run_safe_json, (const char* json, const char* variable), {
   }
   catch (error) {
     console.error('Trying to set variable ' + variable);
+    console.error(error);
     throw error;
   }
   var type;
@@ -76,6 +77,7 @@ EM_JS(const char*, run_safe_get, (const char* variable, const char* key, const c
   }
   catch (error) {
     console.error('Trying to get variable ' + variable + ' and ' + key);
+    console.error(error);
     throw error;
   }
   if (typeof object === 'function' && (!object.prototype || Object.getOwnPropertyNames(object.prototype).length === 1)) object = object.bind(global[variable]);
@@ -100,6 +102,7 @@ EM_JS(void, run_safe_set, (const char* variable, const char* key, const char* va
   }
   catch (error) {
     console.error('Trying to set variable ' + variable + ' and ' + key);
+    console.error(error);
     throw error;
   }
 });
@@ -113,6 +116,7 @@ EM_JS(void, run_safe_del, (const char* variable, const char* key), {
   }
   catch (error) {
     console.error('Trying to delete variable ' + variable + ' and ' + key);
+    console.error(error);
     throw error;
   }
 });
@@ -129,6 +133,7 @@ EM_JS(const char*, run_safe_call, (const char* variable, const char* args, const
   }
   catch (error) {
     console.error('Trying to get variable ' + variable);
+    console.error(error);
     throw error;
   }
   var object;
@@ -137,6 +142,7 @@ EM_JS(const char*, run_safe_call, (const char* variable, const char* args, const
   }
   catch (error) {
    console.error('Trying to call variable ' + variable);
+   console.error(error);
    throw error;
   }
   global[new_variable] = object;
@@ -162,6 +168,7 @@ EM_JS(const char*, run_safe_new, (const char* variable, const char* args, const 
   }
   catch (error) {
     console.error('Trying to get variable ' + variable);
+    console.error(error);
     throw error;
   }
   var object;
@@ -170,6 +177,7 @@ EM_JS(const char*, run_safe_new, (const char* variable, const char* args, const 
   }
   catch (error) {
    console.error('Trying to instantiate variable ' + variable);
+   console.error(error);
    throw error;
   }
   global[new_variable] = object;
@@ -194,6 +202,7 @@ EM_JS(void, run_safe_promise, (const char* parent_promise_id, const char* promis
     }
     catch (error) {
       console.error('Trying to get variable ' + variable);
+      console.error(error);
       throw error;
     }
     var object = await promise;
@@ -213,6 +222,7 @@ EM_JS(const char*, run_safe_type_update, (const char* variable), {
   }
   catch (error) {
     console.error('Trying to get variable ' + variable);
+    console.error(error);
     throw error;
   }
   var type;
