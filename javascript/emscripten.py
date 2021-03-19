@@ -15,10 +15,11 @@ imp = None
 try:
     import ast_decompiler
     import tempfile
+    import random
     import imp
     def decompile(code, original, lineno):
         if original.endswith('.pyc'): original = original[0:-1]
-        object_id = hex(id(code))
+        object_id = hex(id(code)) + repr(random.random())[2:]
         code = ast_decompiler.decompile(code)
         fd, path = tempfile.mkstemp(dir=os.getenv('PYPY_USESSION_DIR'))
         file = open(path, 'w')
