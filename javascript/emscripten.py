@@ -1024,7 +1024,7 @@ def asynchronous(function):
     #source = promise_source + '\n' + source
     code = ast.parse(source)
     function = code.body[0]
-    args = [arg.id for arg in function.args.args]
+    args = [arg.id for arg in function.args.args if arg.id not in ['rpython_promise', 'wait']]
     #new_function = ast.parse('def ' + name + '(rpython_promise=None, *args): ' + (', '.join(args) if args else 'args') + (' = args[0]' if len(args) == 1 else ' = args')).body[0]
     groups = []
     returns = False
@@ -1065,7 +1065,8 @@ def asynchronous(function):
         if last_variables:
            for variable in last_variables:
                objects.append(ast.parse("if isinstance(rpython_promise.promise_{0}, tuple) and len(rpython_promise.promise_{0}) == 99 and rpython_promise.promise_{0}[0] is not None:\n rpython_promise.var_{0} = rpython_promise.promise_{0}[0].rpython_promise.value\n rpython_promise.promise_{0} = rpython_dummy_tuple".format(variable)).body[0])
-           objects.append(ast.parse(get_variables_name(last_variables) + ' = ' + get_variables_cache(last_variables)).body[0])
+           appended_variables = list(set(last_variables + args))
+           objects.append(ast.parse(get_variables_name(appended_variables) + ' = ' + get_variables_cache(appended_variables)).body[0])
         for object in group:
             if isinstance(object, ast.Assign):
                for target in object.targets:
@@ -1080,7 +1081,7 @@ def asynchronous(function):
         if not current_elif.orelse:
            return_object = current_elif.body[-1]
            objects = current_elif.body[0:-1]
-           for variable in last_variables:
+           for variable in list(set(last_variables + args)):
                objects.append(ast.parse('if isinstance({0}, RPYObject): {0}.release()'.format(variable)).body[0])
                #objects.append(ast.parse('if isinstance({0}, RPYObject): {0}.release()\nelif isinstance({0}, rpython_list) and len({0}) and isinstance({0}[0], RPYObject):\n    for rpyobject_item in {0}: rpyobject_item.release()'.format(variable)).body[0])
            objects.append(return_object)
@@ -1092,7 +1093,7 @@ def asynchronous(function):
               variables = [variable for variable in variables if variable not in last_variables]
               last_variables += variables
               variables = last_variables
-              for variable in variables:
+              for variable in list(set(variables + args)): #TODO For now args is appended on here too
 #   {0}[0].promise_id, {0}[0].parent_id = rpython_promise.id, rpython_promise.parent.id
                   objects.append(ast.parse('''
 if isinstance({0}, tuple) and len({0}) == 99 and {0}[0] is not None:
