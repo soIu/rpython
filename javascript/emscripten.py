@@ -974,7 +974,7 @@ def asynchronous(function):
                    object.keep()
             self.awaits = awaits if awaits is not None else []
             self.native_awaits = [item.object for item in native] if native is not None else []
-            if native is not None:
+            if native is not None and len(native):
                values = []
                map = {}
                for index, object in enumerate(native):
