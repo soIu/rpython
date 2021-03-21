@@ -364,6 +364,7 @@ EM_JS(const char*, get_boolean, (const char* variable), {
 EM_JS(const char*, run_unsafe_code, (const char* code), {
   code = UTF8ToString(code);
   var global = typeof rpyGlobalArg !== "undefined" ? rpyGlobalArg : this;
+  if (!Module.wasmMemory) Module.wasmMemory = wasmMemory;
   var result = String(eval(code)(Module, global));
   var lengthBytes = lengthBytesUTF8(result) + 1;
   var stringOnWasmHeap = _malloc(lengthBytes);
