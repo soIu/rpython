@@ -498,11 +498,11 @@ def toFunction(function, keep=False):
     #if globals.functions_cache is None:
     #   globals.functions_cache = {}
     #if function in globals.functions_cache: return globals.functions_cache[function]
-    index = globals.functions
-    functions[index] = function
+    #index = globals.functions
+    #functions[index] = function
     #functions.append(function)
-    globals.functions += 1
-    object =  Object(str(index), safe_function=True) #function_template % (index))
+    #globals.functions += 1
+    object =  Object(str(decorated_functions[function]), safe_function=True) #function_template % (index))
     if keep: object.keep()
     #globals.functions_cache[function] = object
     return object
@@ -510,8 +510,6 @@ def toFunction(function, keep=False):
 def fromFunction(function=None, keep=False):
     if function is None: return 'RPYJSON:null:RPYJSON'
     return toFunction(function, keep=keep).toRef()
-
-def Function(): return fromFunction
 
 @entrypoint_highlevel(key='main', c_name='onfunctioncall', argtypes=[rffi.CCHARP, rffi.CCHARP])
 def onfunctioncall(*arguments):
@@ -522,12 +520,26 @@ def onfunctioncall(*arguments):
     #id = int(function_id)
     #return
     function = functions[int(function_id)]
-    result = function(args=[arg for arg in args]) #if function in decorated_functions else function([arg for arg in args])
+    result = function.function[0](args=[arg for arg in args]) #if function in decorated_functions else function([arg for arg in args])
     run_safe_set('global', 'rpyfunction_call_' + function_id, ('"%s"' % result.variable) if result is not None else 'null', skip_gc=True)
     #run_javascript('global.rpyfunction_call_' + function_id + ((' = "%s"' % result.variable) if result is not None else ' = null'), skip_gc=True)
     #globals.collector_id = None
 
-#decorated_functions = []
+decorated_functions = {}
+#functions_id = {}
+
+class Function:
+    function = (None,)
+    cache = {'count': 0}
+
+    def __init__(self, function):
+        self.cache['count'] += 1
+        count = self.cache['count']
+        self.function = (function,)
+        decorated_functions[self] = count
+        functions[count] = self
+
+    #TODO make this callable without Object.fromFunction
 
 def javascript_function(function=None, asynchronous=False, name=None, count=None): #Spread list of Object to each of the argument
     if not function and asynchronous:
@@ -555,7 +567,8 @@ def javascript_function(function=None, asynchronous=False, name=None, count=None
     exec(code, namespace)
     function = namespace[name]
     #decorated_functions.append(function)
-    return function
+    #return function
+    return Function(function)
 
 args = javascript_function
 
@@ -563,7 +576,7 @@ function = args
 
 snapshot = open(os.path.join(os.path.dirname(os.path.realpath(__file__)), 'utils/snapshot_memory.js'), 'r').read()
 
-#@function
+@Function
 def garbage_collector(args):
     if globals.collector_id is None: return
     garbage = globals.garbage
