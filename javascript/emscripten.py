@@ -605,6 +605,7 @@ method_template = '''
 def fromMethod():
     methods = {}
     globals.method_callers += 1
+    method_callers = globals.method_callers
     @entrypoint_highlevel(key='main', c_name='onmethodcall' + str(globals.method_callers), argtypes=[rffi.CCHARP, rffi.CCHARP])
     def onmethodcall(*arguments):
         pointers = list(arguments)
@@ -615,6 +616,7 @@ def fromMethod():
         result = method(args=[arg for arg in args])
         run_safe_set('global', 'rpymethod_call_' + method_id, ('"%s"' % result.variable) if result is not None else 'null')
         #run_javascript('global.rpymethod_call_' + method_id + ((' = "%s"' % result.variable) if result is not None else ' = null'))
+    onmethodcall.__name__ = 'onmethodcall' + str(globals.method_callers)
 
     #class Cache:
     #    methods = None
@@ -625,15 +627,17 @@ def fromMethod():
         #if cache.methods is None:
         #   cache.methods = {}
         #if method in cache.methods: return cache.methods[method]
-        globals.methods += 1
-        methods[globals.methods] = method
-        object = Object(str(globals.methods), safe_method=globals.method_callers) #method_template % (globals.methods, globals.method_callers))
+        #globals.methods += 1
+        methods[method_callers] = method
+        object = Object(str(method_callers), safe_method=method_callers) #method_template % (globals.methods, globals.method_callers))
         if keep: object.keep()
         #cache.methods[method] = object.toRef()
         return object.toRef() #cache.methods[method]
     return Method
 
-Method = fromMethod
+def Method(count=0):
+    if not count: return fromMethod()
+    return (fromMethod() for index in range(count))
 
 def method(function, asynchronous=False, name=None, count=None): #Spread list of Object to each of the argument
     if asynchronous:
@@ -648,7 +652,8 @@ def method(function, asynchronous=False, name=None, count=None): #Spread list of
     namespace = {'rpython_decorated_function': function, 'RPYObject': Object}
     indent = '\n' + (' ' * 4)
     code = 'def ' + name + '(' + arg_names + '):'
-    if count: code += indent + 'if args is None: return rpython_decorated_function(' + ', '.join(['self'] + ['rpyarg%s or RPYObject("null")' % (index + 1) for index in range(count)]) + ')'
+    #if count: 
+    code += indent + 'if args is None: return rpython_decorated_function(' + ', '.join(['self'] + ['rpyarg%s or RPYObject("null")' % (index + 1) for index in range(count)]) + ')'
     code += indent + 'if args is not None and len(args) < ' + str(count) + ': return rpython_decorated_function(' + ', '.join(['self'] + ['args[%s] if len(args) >= %s else RPYObject("null")' % (index, index + 1) for index in range(count)])  + ')'
     code += indent + 'assert args is not None and len(args) >= ' + str(count)
     code += indent + 'return rpython_decorated_function(' + args + ')'
