@@ -58,7 +58,7 @@ EM_JS(const char*, run_safe_json, (const char* json, const char* variable), {
   }
   var type;
   if (object === null) type = 'null';
-  if (Array.isArray(object)) type = 'array';
+  else if (Array.isArray(object)) type = 'array';
   else type = typeof object;
   var lengthBytes = lengthBytesUTF8(type) + 1;
   var stringOnWasmHeap = _malloc(lengthBytes);
@@ -84,7 +84,7 @@ EM_JS(const char*, run_safe_get, (const char* variable, const char* key, const c
   global[new_variable] = object;
   var type;
   if (object === null) type = 'null';
-  if (Array.isArray(object)) type = 'array';
+  else if (Array.isArray(object)) type = 'array';
   else type = typeof object;
   var lengthBytes = lengthBytesUTF8(type) + 1;
   var stringOnWasmHeap = _malloc(lengthBytes);
@@ -148,7 +148,7 @@ EM_JS(const char*, run_safe_call, (const char* variable, const char* args, const
   global[new_variable] = object;
   var type;
   if (object === null) type = 'null';
-  if (Array.isArray(object)) type = 'array';
+  else if (Array.isArray(object)) type = 'array';
   else type = typeof object;
   var lengthBytes = lengthBytesUTF8(type) + 1;
   var stringOnWasmHeap = _malloc(lengthBytes);
@@ -183,7 +183,7 @@ EM_JS(const char*, run_safe_new, (const char* variable, const char* args, const 
   global[new_variable] = object;
   var type;
   if (object === null) type = 'null';
-  if (Array.isArray(object)) type = 'array';
+  else if (Array.isArray(object)) type = 'array';
   else type = typeof object;
   var lengthBytes = lengthBytesUTF8(type) + 1;
   var stringOnWasmHeap = _malloc(lengthBytes);
@@ -227,7 +227,7 @@ EM_JS(const char*, run_safe_type_update, (const char* variable), {
   }
   var type;
   if (object === null) type = 'null';
-  if (Array.isArray(object)) type = 'array';
+  else if (Array.isArray(object)) type = 'array';
   else type = typeof object;
   var lengthBytes = lengthBytesUTF8(type) + 1;
   var stringOnWasmHeap = _malloc(lengthBytes);
@@ -253,7 +253,7 @@ EM_JS(const char*, create_function, (const char* id, const char* new_variable), 
   global[new_variable] = object;
   var type;
   if (object === null) type = 'null';
-  if (Array.isArray(object)) type = 'array';
+  else if (Array.isArray(object)) type = 'array';
   else type = typeof object;
   var lengthBytes = lengthBytesUTF8(type) + 1;
   var stringOnWasmHeap = _malloc(lengthBytes);
@@ -280,7 +280,7 @@ EM_JS(const char*, create_method, (const char* id, const char* method_id, const 
   global[new_variable] = object;
   var type;
   if (object === null) type = 'null';
-  if (Array.isArray(object)) type = 'array';
+  else if (Array.isArray(object)) type = 'array';
   else type = typeof object;
   var lengthBytes = lengthBytesUTF8(type) + 1;
   var stringOnWasmHeap = _malloc(lengthBytes);
@@ -300,7 +300,7 @@ EM_JS(const char*, create_js_closure, (const char* func, const char* args, const
   global[new_variable] = object;
   var type;
   if (object === null) type = 'null';
-  if (Array.isArray(object)) type = 'array';
+  else if (Array.isArray(object)) type = 'array';
   else type = typeof object;
   var lengthBytes = lengthBytesUTF8(type) + 1;
   var stringOnWasmHeap = _malloc(lengthBytes);
