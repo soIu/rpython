@@ -857,6 +857,9 @@ class Object:
         #return number
 
     def toBoolean(self):
+        self._update()
+        if self.type == 'boolean':
+           return True if 'true' == self.toString() else False
         return True if 'true' == get_boolean(self.variable) else False
 
     def toBool(self): return self.toBoolean()
