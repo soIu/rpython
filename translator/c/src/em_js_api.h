@@ -15,7 +15,7 @@ extern const char* run_safe_new(const char* variable, const char* args, const ch
 
 extern void run_safe_promise(const char* arg1, const char* arg2, const char* arg3);
 
-extern const char* create_function(const char* id, const char* new_variable);
+extern const char* create_function(const char* id, const char* new_variable, const char* function_info);
 
 extern const char* create_method(const char* id, const char* method_id, const char* new_variable);
 

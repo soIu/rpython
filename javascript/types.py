@@ -14,7 +14,7 @@ NoneType = type(None)
 
 str = str
 
-ref = str
+ref = 'RPYJSON:null:RPYJSON'
 
 int = int
 

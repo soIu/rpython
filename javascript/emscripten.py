@@ -235,11 +235,13 @@ EM_JS(const char*, run_safe_type_update, (const char* variable), {
   return stringOnWasmHeap;
 });
 
-EM_JS(const char*, create_function, (const char* id, const char* new_variable), {
+EM_JS(const char*, create_function, (const char* id, const char* new_variable, const char* function_info), {
   var global = typeof rpyGlobalArg !== "undefined" ? rpyGlobalArg : this;
   var index = parseInt(UTF8ToString(id));
   new_variable = UTF8ToString(new_variable);
-  var object = (function (...args) {
+  function_info = UTF8ToString(function_info);
+  var new_object = {};
+  new_object[function_info] = (function (...args) {
     if (!global.rpyfunction_call_args) global.rpyfunction_call_args = {};
     var variable = 'rpyfunction_call_args';
     global.rpyfunction_call_args[index] = args;
@@ -249,6 +251,10 @@ EM_JS(const char*, create_function, (const char* id, const char* new_variable), 
     var result = global[global['rpyfunction_call_' + index]];
     delete global['rpyfunction_call_' + index];
     return result;
+  });
+  //object[function_info].rpython_info = function_info;
+  var object = (function (...args) {
+    return new_object[function_info](...args);
   });
   global[new_variable] = object;
   var type;
@@ -416,7 +422,7 @@ run_safe_type_update = rffi_1(rffi.llexternal('run_safe_type_update', [rffi.CCHA
 
 run_unsafe_code = rffi_1(rffi.llexternal('run_unsafe_code', [rffi.CCHARP], rffi.CCHARP, compilation_info=info))
 
-create_function = rffi_2(rffi.llexternal('create_function', [rffi.CCHARP, rffi.CCHARP], rffi.CCHARP, compilation_info=info))
+create_function = rffi_3(rffi.llexternal('create_function', [rffi.CCHARP, rffi.CCHARP, rffi.CCHARP], rffi.CCHARP, compilation_info=info))
 create_method = rffi_3(rffi.llexternal('create_method', [rffi.CCHARP, rffi.CCHARP, rffi.CCHARP], rffi.CCHARP, compilation_info=info))
 create_js_closure = rffi_3(rffi.llexternal('create_js_closure', [rffi.CCHARP, rffi.CCHARP, rffi.CCHARP], rffi.CCHARP, compilation_info=info))
 
@@ -502,7 +508,7 @@ def toFunction(function, keep=False):
     #functions[index] = function
     #functions.append(function)
     #globals.functions += 1
-    object =  Object(str(decorated_functions[function]), safe_function=True) #function_template % (index))
+    object =  Object(str(decorated_functions[function]), safe_function=True, safe_function_info='Function %s in module %s' % (function.function_name, function.function_module)) #function_template % (index))
     if keep: object.keep()
     #globals.functions_cache[function] = object
     return object
@@ -538,6 +544,8 @@ class Function:
         self.function = (function,)
         decorated_functions[self] = count
         functions[count] = self
+        self.function_name = function.__name__
+        self.function_module = function.__module__
 
     #TODO make this callable without Object.fromFunction
 
@@ -753,7 +761,7 @@ class Object:
     fromFunction = staticmethod(toFunction)
     createClosure = staticmethod(create_closure)
 
-    def __init__(self, code, bind='', prestart='', safe_json=False, safe_get="", safe_call="", safe_new=str(), safe_function=False, safe_method=0, safe_closure_args=None):
+    def __init__(self, code, bind='', prestart='', safe_json=False, safe_get="", safe_call="", safe_new=str(), safe_function=False, safe_function_info=str(), safe_method=0, safe_closure_args=None):
         self.id = globals.objects
         globals.objects += 1
         self.code = code
@@ -767,7 +775,7 @@ class Object:
         elif safe_new:
            self.type = run_safe_new(safe_new, code, self.variable)
         elif safe_function:
-           self.type = create_function(code, self.variable)
+           self.type = create_function(code, self.variable, safe_function_info)
         elif safe_method:
            self.type = create_method(code, str(safe_method), self.variable)
         elif safe_closure_args is not None:
@@ -1111,7 +1119,7 @@ def asynchronous(function):
            #last_variables = None
            break
         else:
-           if len(variables):
+           if len(variables) or (not len(variables) and not last_variables):
               variables = [variable for variable in variables if variable not in last_variables]
               last_variables += variables
               variables = last_variables
@@ -1190,6 +1198,7 @@ else:
     entry = promise.entry
     def async_wrapper(*args):
         return entry(*args)
+    async_wrapper.asynchronous = True
     return async_wrapper
 
 asynchronous_function = asynchronous
