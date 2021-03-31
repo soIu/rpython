@@ -978,8 +978,8 @@ def asynchronous(function):
             self.count += 1
             self.promises[promise.id] = promise
             result = self.function(promise, promise.wait, *args)
-            if not promise.next_called and not promise.waitable.object['resolved']:
-               promise.resolve(result)
+            #if not promise.next_called and not promise.waitable.object['resolved']:
+            #   promise.resolve(result)
             return promise.waitable
 
         def next(self):
@@ -994,8 +994,8 @@ def asynchronous(function):
             self.awaits = []
             self.step += 1
             result = self.function(self, self.wait, *self.args)
-            if not self.next_called and not self.waitable.object['resolved']:
-               self.resolve(result)
+            #if not self.next_called and not self.waitable.object['resolved']:
+            #   self.resolve(result)
             #Maybe returns here too to catch promise chain
 
         def wait(self, awaits=None, native=None):
@@ -1058,12 +1058,20 @@ def asynchronous(function):
     #new_function = ast.parse('def ' + name + '(rpython_promise=None, *args): ' + (', '.join(args) if args else 'args') + (' = args[0]' if len(args) == 1 else ' = args')).body[0]
     groups = []
     returns = False
+    for object in ast.walk(code):
+        if isinstance(object, ast.Return):
+           resolve = ast.parse('rpython_promise.resolve()' if object.value is None else 'rpython_promise.resolve(rpython_keep_object())').body[0].value
+           if object.value is None:
+              resolve.args.append(ast.parse('None').body[0].value)
+           else:
+              resolve.args[0].args.append(object.value)
+           object.value = resolve
     for line in function.body:
         if not groups: groups.append([])
         object = line #{'line': line}
         if isinstance(object, ast.Return):
            returns = True
-           resolve = ast.parse('return rpython_promise.resolve()' if object.value is None else 'return rpython_promise.resolve(rpython_keep_object())').body[0]
+           """resolve = ast.parse('return rpython_promise.resolve()' if object.value is None else 'return rpython_promise.resolve(rpython_keep_object())').body[0]
            if object.value is None:
               resolve.value.args.append(object.value if object.value is not None else ast.parse('None').body[0].value)
            else:
@@ -1074,7 +1082,8 @@ def asynchronous(function):
            #   groups[-1].append(keep)
            groups[-1].append(resolve)
            break
-        else: groups[-1].append(object)
+        else: """
+        groups[-1].append(object)
         conditions = []
         conditions += [(isinstance(line, ast.Expr) or isinstance(line, ast.Assign)) and isinstance(line.value, ast.Call) and isinstance(line.value.func, ast.Name) and line.value.func.id == 'wait']
         conditions += [(isinstance(line, ast.Expr) or isinstance(line, ast.Assign)) and isinstance(line.value, ast.Call) and isinstance(line.value.func, ast.Attribute) and line.value.func.attr == 'wait']
