@@ -193,7 +193,7 @@ EM_JS(const char*, run_safe_new, (const char* variable, const char* args, const 
 
 EM_JS(void, run_safe_promise, (const char* parent_promise_id, const char* promise_id, const char* variables), {
   var global = typeof rpyGlobalArg !== "undefined" ? rpyGlobalArg : this;
-  var args = [UTF8ToString(parent_promise_id), UTF8ToString(promise_id)].map(function (string) {return allocate.length === 2 ? allocate(intArrayFromString(string), ALLOC_NORMAL) : allocate(intArrayFromString(string), 'i8', ALLOC_NORMAL)});
+  var args = [UTF8ToString(parent_promise_id), UTF8ToString(promise_id)]; //.map(function (string) {return allocate.length === 2 ? allocate(intArrayFromString(string), ALLOC_NORMAL) : allocate(intArrayFromString(string), 'i8', ALLOC_NORMAL)});
   variables = JSON.parse(UTF8ToString(variables));
   Promise.all(variables.map(async function (variable) {
     var promise;
@@ -209,7 +209,8 @@ EM_JS(void, run_safe_promise, (const char* parent_promise_id, const char* promis
     if (object && object.then) object.rpython_resolved = true;
     global[variable] = object;
   })).then(function () {
-    Module.asm.onresolve(...args);
+    //Module.asm.onresolve(...args);
+    Module.ccall('onresolve', 'null', ['string', 'string'], args);
   }) //.catch(function (error) {console.error(error) /*|| throw error*/});
 });
 
@@ -245,8 +246,9 @@ EM_JS(const char*, create_function, (const char* id, const char* new_variable, c
     if (!global.rpyfunction_call_args) global.rpyfunction_call_args = {};
     var variable = 'rpyfunction_call_args';
     global.rpyfunction_call_args[index] = args;
-    args = [variable, index.toString()].map(function (string) {return allocate.length === 2 ? allocate(intArrayFromString(string), ALLOC_NORMAL) : allocate(intArrayFromString(string), 'i8', ALLOC_NORMAL)});
-    Module.asm.onfunctioncall(...args);
+    args = [variable, index.toString()]; //.map(function (string) {return allocate.length === 2 ? allocate(intArrayFromString(string), ALLOC_NORMAL) : allocate(intArrayFromString(string), 'i8', ALLOC_NORMAL)});
+    //Module.asm.onfunctioncall(...args);
+    Module.ccall('onfunctioncall', 'null', ['string', 'string'], args);
     delete global.rpyfunction_call_args[index];
     var result = global[global['rpyfunction_call_' + index]];
     delete global['rpyfunction_call_' + index];
@@ -254,7 +256,13 @@ EM_JS(const char*, create_function, (const char* id, const char* new_variable, c
   });
   //object[function_info].rpython_info = function_info;
   var object = (function (...args) {
-    return new_object[function_info](...args);
+    try {
+      return new_object[function_info](...args);
+    }
+    catch (error) {
+      console.error('Trying to call ' + function_info);
+      throw error;
+    }
   });
   global[new_variable] = object;
   var type;
@@ -276,8 +284,9 @@ EM_JS(const char*, create_method, (const char* id, const char* method_id, const 
     if (!global.rpymethod_call_args) global.rpymethod_call_args = {};
     var variable = 'rpymethod_call_args';
     global.rpymethod_call_args[index] = args;
-    args = [variable, index.toString()].map(function (string) {return allocate.length === 2 ? allocate(intArrayFromString(string), ALLOC_NORMAL) : allocate(intArrayFromString(string), 'i8', ALLOC_NORMAL)});
-    Module.asm['onmethodcall' + method_id](...args);
+    args = [variable, index.toString()]; //.map(function (string) {return allocate.length === 2 ? allocate(intArrayFromString(string), ALLOC_NORMAL) : allocate(intArrayFromString(string), 'i8', ALLOC_NORMAL)});
+    //Module.asm['onmethodcall' + method_id](...args);
+    Module.ccall('onmethodcall' + method_id, 'null', ['string', 'string'], args);
     delete global.rpymethod_call_args[index];
     var result = global[global['rpymethod_call_' + index]];
     delete global['rpymethod_call_' + index];
@@ -371,7 +380,22 @@ EM_JS(const char*, run_unsafe_code, (const char* code), {
   code = UTF8ToString(code);
   var global = typeof rpyGlobalArg !== "undefined" ? rpyGlobalArg : this;
   if (!Module.wasmMemory) Module.wasmMemory = wasmMemory;
-  var result = String(eval(code)(Module, global));
+  var eval_function;
+  try {
+    eval_function = eval(code);
+  }
+  catch (error) {
+    console.error('Trying to build eval code: ' + code);
+    throw error;
+  }
+  var result;
+  try {
+    result = String(eval_function(Module, global));
+  }
+  catch (error) {
+    console.error('Trying to execute eval code: ' + code);
+    throw error;
+  }
   var lengthBytes = lengthBytesUTF8(result) + 1;
   var stringOnWasmHeap = _malloc(lengthBytes);
   stringToUTF8(result, stringOnWasmHeap, lengthBytes);
@@ -491,8 +515,9 @@ function_template = '''
   var index = %s;
   var variable = 'global.rpyfunction_call_args[' + index + ']';
   global.rpyfunction_call_args[index] = args;
-  args = [variable, index.toString()].map(function (string) {return allocate.length === 2 ? allocate(intArrayFromString(string), ALLOC_NORMAL) : allocate(intArrayFromString(string), 'i8', ALLOC_NORMAL)});
-  Module.asm.onfunctioncall(...args);
+  args = [variable, index.toString()]; //.map(function (string) {return allocate.length === 2 ? allocate(intArrayFromString(string), ALLOC_NORMAL) : allocate(intArrayFromString(string), 'i8', ALLOC_NORMAL)});
+  //Module.asm.onfunctioncall(...args);
+  Module.ccall('onnfunctioncall', 'null', ['string', 'string'], args);
   delete global.rpyfunction_call_args[index];
   var result = global[global['rpyfunction_call_' + index]];
   delete global['rpyfunction_call_' + index];
@@ -614,8 +639,8 @@ method_template = '''
   var index = %s;
   var variable = 'global.rpymethod_call_args[' + index + ']';
   global.rpymethod_call_args[index] = args;
-  args = [variable, index.toString()].map(function (string) {return allocate.length === 2 ? allocate(intArrayFromString(string), ALLOC_NORMAL) : allocate(intArrayFromString(string), 'i8', ALLOC_NORMAL)});
-  Module.asm.onmethodcall%s(...args);
+  args = [variable, index.toString()]; //.map(function (string) {return allocate.length === 2 ? allocate(intArrayFromString(string), ALLOC_NORMAL) : allocate(intArrayFromString(string), 'i8', ALLOC_NORMAL)});
+  Module.ccall('onmethodcall%s', 'null', ['string', 'string'], args);
   delete global.rpymethod_call_args[index];
   var result = global[global['rpymethod_call_' + index]];
   delete global['rpymethod_call_' + index];
