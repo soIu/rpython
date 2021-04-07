@@ -116,6 +116,8 @@ class Darwin_i386(Darwin):
     name = "darwin_i386"
     DEFAULT_CC = 'clang -arch i386'
 
+import platform
+
 class Darwin_x86_64(Darwin):
     name = "darwin_x86_64"
-    DEFAULT_CC = 'clang -arch x86_64'
+    DEFAULT_CC = 'clang -arch x86_64' if platform.machine() != 'arm64' else 'clang'

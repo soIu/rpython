@@ -272,7 +272,7 @@ if sys.platform.startswith('linux'):
 elif sys.platform == 'darwin':
     from rpython.translator.platform.darwin import Darwin_i386, Darwin_x86_64, Darwin_PowerPC
     import platform
-    assert platform.machine() in ('Power Macintosh', 'i386', 'x86_64')
+    #assert platform.machine() in ('Power Macintosh', 'i386', 'x86_64')
 
     if  platform.machine() == 'Power Macintosh':
         host_factory = Darwin_PowerPC
