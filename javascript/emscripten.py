@@ -893,7 +893,12 @@ class Object:
         self._update()
         if self.type == 'boolean':
            return True if 'true' == self.toString() else False
-        return True if 'true' == get_boolean(self.variable) else False
+        #return True if 'true' == get_boolean(self.variable) else False
+        elif self.type in ['array', 'object']: return True
+        elif self.type == 'string': return self['length'].toBoolean()
+        elif self.type == 'number': return self.toInteger() != 0
+        elif self.type in ['null', 'undefined']: return False
+        return True
 
     def toBool(self): return self.toBoolean()
 
