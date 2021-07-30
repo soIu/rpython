@@ -102,7 +102,8 @@ if (process.argv[2] && process.argv[2].indexOf('.py') !== -1) {
     }
     if (process.argv.indexOf('--keep-temp') !== -1) process.exit();
     try {
-      fs.rmdirSync(tempdir, {recursive: true});
+      if (fs.rmSync) fs.rmSync(tempdir, {recursive: true});
+      else fs.rmdirSync(tempdir, {recursive: true});
     }
     catch (error) {
       child_process.execSync('rm -rf ' + tempdir);

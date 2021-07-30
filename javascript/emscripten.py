@@ -478,24 +478,27 @@ def rpyobject(function):
 
 @rpyobject
 def toString(value):
-    if value is None: return 'null'
+    #if value is None: return 'null'
     return json.fromString(value)
 
 toStr = toString
 
 @rpyobject
 def toInt(value):
-    return '%s' % (value)
+    #return '%s' % (value)
+    return json.fromInteger(value)
 
 toInteger = toInt
 
 @rpyobject
 def toFloat(value):
-    return repr(value)
+    #return repr(value)
+    return json.fromFloat(value)
 
 @rpyobject
 def toBoolean(value):
-    return 'true' if value == True else 'false' if value == False else 'null'
+    #return 'true' if value == True else 'false' if value == False else 'null'
+    return json.fromBoolean(value)
 
 toBool = toBoolean
 
