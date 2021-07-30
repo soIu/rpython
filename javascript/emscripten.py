@@ -620,7 +620,7 @@ def garbage_collector(args):
     if globals.pendingAsync is None or not len(globals.pendingAsync):
        if globals.snapshot is None:
           globals.snapshot = Object(snapshot).keep()
-       globals.setTimeout(globals.snapshot.toRef(), JSON.fromInteger(0))
+       globals.setTimeout(globals.snapshot.toRef()) #, JSON.fromInteger(0))
     globals.collector_id = None
 
 
@@ -631,9 +631,9 @@ def run_garbage_collector():
     #if globals.collector_function is None:
     globals.collector_function = json.fromFunction(garbage_collector)
     if globals.setTimeout is None:
-       globals.setTimeout = Object('setTimeout').keep().toFunction()
+       globals.setTimeout = Object('Promise.resolve()')['then'].keep().toFunction()
     setTimeout = globals.setTimeout
-    timeout = setTimeout(globals.collector_function, json.fromInteger(0))
+    timeout = setTimeout(globals.collector_function) #, json.fromInteger(0))
     globals.collector_id = timeout.toString()
 
 method_template = '''
