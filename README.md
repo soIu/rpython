@@ -90,9 +90,17 @@ def target(*args): return main, None
 
 # Asynchronous Execution
 
-When we decide to implement async/await the easiest option is to use [Asyncify](https://emscripten.org/docs/porting/asyncify.html). But Asyncify come with few caveats, overhead both in performance and file size, and the worst, [reentrancy](https://emscripten.org/docs/porting/asyncify.html). Asyncify doesn't support reentrancy and that means if RPython is awaiting a task blocking the execution stack, and another function is called (either by user event like click or a timer, or another asynchronous task, etc) it will throw an error. We can overcome this by awaiting RPython until it is done executing active task and immediately call it but **that will results in synchronous execution (no parallel) and that is not what async/await is all about.**
+When we decide to implement async/await the easiest option is to use [Asyncify](https://emscripten.org/docs/porting/asyncify.html). But Asyncify come with few caveats, overhead both in performance and file size, and the worst, [reentrancy](https://emscripten.org/docs/porting/asyncify.html#reentrancy). Asyncify doesn't support reentrancy and that means if RPython is awaiting a task blocking the execution stack, and another function is called (either by user event like click or a timer, or another asynchronous task, etc) it will throw an error. We can overcome this by awaiting RPython until it is done executing active task and immediately call it but **that will results in synchronous execution (no parallel) and that is not what async/await is all about.**
 
 Another solution is implementing an event loop, awaiting in a pseudo while loop for event listener calls but that is complex and non-intiuitive. What we do alternatively is transforming the function to a series of callbacks and yields at compile time (RPython supports evaluating and modifying Python objects at compile time), consisting of variables caching and re-assigning on the next tick and resolves the caller when the function is done executing (similar to https://babeljs.io/docs/en/babel-plugin-transform-async-to-generator). This is all done with the asynchronous decorator.
+
+# WebAssembly and Memory
+
+We use wasm2js on default because current implementation of WebAssembly doesn't support shrinking memory (e.g freeing allocated memory, allocated memory can only be zero'd but not phisically freed in WebAssembly) but wasm2js supports it. To compile to original wasm, you need to explicitly pass --wasm argument to rpython. It is only recommended to use it on high memory, vertically-scaled servers so memory will be allocated at high volume without a problem. Our transition to wasm2js also enables it to run on React Native and other runtimes that doesn't have WebAssembly. Here is some github issues that you can read about WebAssembly and Memory:
+
+- [Shrinking memory and swap/switch memory or clone the instance it self to 'force' gc collecting the exponentially grown memory](https://github.com/WebAssembly/design/issues/1427)
+- [Freeing/Shrinking memory](https://github.com/WebAssembly/design/issues/1300)
+- [Wasm needs a better memory management story](https://github.com/WebAssembly/design/issues/1397)
 
 # Limitation
 
