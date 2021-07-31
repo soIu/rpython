@@ -49,6 +49,26 @@ function deserialize_rpython_json(object) {
   return object;
 }
 
+function rpythonShrinkToInitial(copy) {
+  var newBuffer = new ArrayBuffer(copy.byteLength);
+  var newHEAP8 = new Int8Array(newBuffer);
+  newHEAP8.set(copy);
+  HEAP8 = new Int8Array(newBuffer);
+  HEAP16 = new Int16Array(newBuffer);
+  HEAP32 = new Int32Array(newBuffer);
+  HEAPU8 = new Uint8Array(newBuffer);
+  HEAPU16 = new Uint16Array(newBuffer);
+  HEAPU32 = new Uint32Array(newBuffer);
+  HEAPF32 = new Float32Array(newBuffer);
+  HEAPF64 = new Float64Array(newBuffer);
+  buffer = newBuffer;
+  Module.wasmMemory.buffer = buffer;
+  bufferView = HEAPU8;
+  updateGlobalBufferAndViews(newBuffer);
+}
+
+var use_wasm = process.argv.indexOf('--wasm') !== -1;
+
 var emcc = platform === 'win32' ? 'emcc.bat' : 'emcc';
 var python = 'pypy';
 if (!check_exist('pypy')) {
@@ -75,7 +95,7 @@ if (process.argv[2] && process.argv[2].indexOf('.py') !== -1) {
   if (platform === 'win32') make = make.replace('RPYDIR = ', 'RPYDIR = "' + rpydir + '"#')
   make = make.replace(/-lutil/g, '');
   make = make.replace(/--export-all-symbols/g, '--export-dynamic');
-  make = make.replace('CC = ', 'CC = ' + emcc + ' -s ALLOW_MEMORY_GROWTH=1 -s \'EXPORTED_FUNCTIONS=["_main", "_malloc", "_onresolve", "_onfunctioncall"]\' -s \'EXTRA_EXPORTED_RUNTIME_METHODS=["ccall"]\'' + (debug_flag ? ' -g3' : (source_flag ? ' -g4' : '')) + ' #');
+  make = make.replace('CC = ', 'CC = ' + emcc + (!use_wasm ? ' -s WASM=0 ' : ' ') + '-s ALLOW_MEMORY_GROWTH=1 -s \'EXPORTED_FUNCTIONS=["_main", "_malloc", "_onresolve", "_onfunctioncall"]\' -s \'EXTRA_EXPORTED_RUNTIME_METHODS=["ccall"]\'' + (debug_flag ? ' -g3' : (source_flag ? ' -g4' : '')) + ' #');
   make = make.replace('TARGET = ', 'TARGET = ' + file + '.js #');
   make = make.replace('DEFAULT_TARGET = ', 'DEFAULT_TARGET = ' + file + '.js #');
   fs.writeFileSync(makefile, make);
@@ -87,7 +107,10 @@ if (process.argv[2] && process.argv[2].indexOf('.py') !== -1) {
   }
   child_process.execSync(['make', '-j', cores].join(' '), {env: process.env, stdio: 'inherit', cwd: directory});
   for (var filename of fs.readdirSync(directory)) {
-    if (filename.startsWith(file + '.')) fs.copyFileSync(path.join(directory, filename), path.join(process.cwd(), filename));
+    if (filename.startsWith(file + '.')) {
+      if (use_wasm || filename !== (file + '.js')) fs.copyFileSync(path.join(directory, filename), path.join(process.cwd(), filename));
+      else fs.writeFileSync(path.join(process.cwd(), filename), fs.readFileSync(path.join(directory, filename)).toString().replace('bufferView = HEAPU8;', 'bufferView = HEAPU8;\nModule.rpythonShrinkToInitial = ' + rpythonShrinkToInitial.toString()));
+    }
   }
   try {
     fs.appendFileSync(path.join(process.cwd(), file + '.js' ), '\n' + deserialize_rpython_json.toString() + '\nModule.wasmMemory = wasmMemory;\nvar rpyGlobalArg = {"Module": Module, "deserialize_rpython_json": deserialize_rpython_json, "get_dirname": function () {return __dirname;}};\nrpyGlobalArg.global = rpyGlobalArg;\n if (typeof window !== "undefined") rpyGlobalArg.window = window;\n if (typeof require !== "undefined") rpyGlobalArg.require = require;\n if (typeof self !== "undefined") rpyGlobalArg.self = self;');
