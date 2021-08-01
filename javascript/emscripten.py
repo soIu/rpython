@@ -612,7 +612,7 @@ function = args
 
 snapshot = open(os.path.join(os.path.dirname(os.path.realpath(__file__)), 'utils/snapshot_memory.js'), 'r').read()
 
-@Function
+#@Function
 def garbage_collector(args):
     if globals.collector_id is None: return
     garbage = globals.garbage
@@ -624,7 +624,7 @@ def garbage_collector(args):
     globals.collector_id = None
 
 
-def run_garbage_collector():
+def old_run_garbage_collector():
     globals.collector_id = ''
     if globals.garbage is None:
        globals.garbage = {}
@@ -635,6 +635,29 @@ def run_garbage_collector():
     setTimeout = globals.setTimeout
     timeout = setTimeout(globals.collector_function) #, json.fromInteger(0))
     globals.collector_id = timeout.toString()
+
+@Function
+def check_pending_async(args):
+    if globals.pendingAsync is None or not len(globals.pendingAsync): return Object.fromBoolean(False)
+    return Object.fromBoolean(True)
+
+@Function
+def empty_collector(args):
+    globals.collector_id = None
+
+def run_garbage_collector():
+    if globals.garbage is None:
+       globals.garbage = {}
+    if globals.collector_id is not None: return
+    globals.collector_id = ''
+    #if not globals.pendingAsync: globals.pendingAsync = Object.fromDict({}).keep()
+    if globals.setTimeout is None: globals.setTimeout = Object('Promise.resolve()')['then'].keep().toFunction()
+    if globals.snapshot is None:
+       globals.snapshot = Object(snapshot).keep()
+       Module = Object.get('Module')
+       Module['rpython_check_pending_async'] = JSON.fromFunction(check_pending_async)
+       Module['rpython_release_gc_lock'] = JSON.fromFunction(empty_collector)
+    globals.setTimeout(globals.snapshot.toRef())
 
 method_template = '''
 (function (...args) {
