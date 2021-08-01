@@ -4,9 +4,8 @@
     var releaseLock = global.Module.rpython_release_gc_lock;
     var checkPendingAsync = global.Module.rpython_check_pending_async;
     if (checkPendingAsync()) return releaseLock();
-    console.warn('gc collecting');
     if (!copy) {
-      Module.rpython_release_gc_lock();
+      releaseLock();
       copy = new Int8Array(global.Module.wasmMemory.buffer.slice());
     }
     if (Module.rpythonShrinkToInitial && copy.byteLength < global.Module.wasmMemory.buffer.byteLength) return Module.rpythonShrinkToInitial(copy);
