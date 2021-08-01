@@ -1,7 +1,7 @@
 (function () {
   var copy;
   return function () {
-    var releaseLock = global.Module.rpython_release_gc_lock();
+    var releaseLock = global.Module.rpython_release_gc_lock;
     var checkPendingAsync = global.Module.rpython_check_pending_async;
     if (checkPendingAsync()) return releaseLock();
     console.warn('gc collecting');
