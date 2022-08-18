@@ -550,7 +550,7 @@ def onfunctioncall(*arguments):
     pointers = list(arguments)
     variable, function_id = [rffi.charp2str(pointer) for pointer in pointers]
     for pointer in pointers: lltype.free(pointer, flavor='raw')
-    args = Object.get(variable, function_id).toArray()
+    args = unsafe_object_get(variable, function_id).toArray()
     #id = int(function_id)
     #return
     function = functions[int(function_id)]
@@ -631,7 +631,7 @@ def old_run_garbage_collector():
     #if globals.collector_function is None:
     globals.collector_function = json.fromFunction(garbage_collector)
     if globals.setTimeout is None:
-       globals.setTimeout = Object('Promise.resolve()')['then'].keep().toFunction()
+       globals.setTimeout = Object('Promise.resolve()').unsafe_get_item('then').keep().toFunction()
     setTimeout = globals.setTimeout
     timeout = setTimeout(globals.collector_function) #, json.fromInteger(0))
     globals.collector_id = timeout.toString()
@@ -651,10 +651,10 @@ def run_garbage_collector():
     if globals.collector_id is not None: return
     globals.collector_id = ''
     #if not globals.pendingAsync: globals.pendingAsync = Object.fromDict({}).keep()
-    if globals.setTimeout is None: globals.setTimeout = Object('Promise.resolve()')['then'].keep().toFunction()
+    if globals.setTimeout is None: globals.setTimeout = Object('Promise.resolve()').unsafe_get_item('then').keep().toFunction()
     if globals.snapshot is None:
        globals.snapshot = Object(snapshot).keep()
-       Module = Object.get('Module')
+       Module = unsafe_object_get('Module')
        Module['rpython_check_pending_async'] = JSON.fromFunction(check_pending_async)
        Module['rpython_release_gc_lock'] = JSON.fromFunction(empty_collector)
     globals.setTimeout(globals.snapshot.toRef())
@@ -683,7 +683,7 @@ def fromMethod():
         pointers = list(arguments)
         variable, method_id = [rffi.charp2str(pointer) for pointer in pointers]
         for pointer in pointers: lltype.free(pointer, flavor='raw')
-        args = Object.get(variable, method_id).toArray()
+        args = unsafe_object_get(variable, method_id).toArray()
         method = methods[int(method_id)]
         result = method(args=[arg for arg in args])
         run_safe_set('global', 'rpymethod_call_' + method_id, ('"%s"' % result.variable) if result is not None else 'null')
@@ -777,12 +777,12 @@ class Array:
         self.object = object
 
     def __iter__(self):
-        object = self.object['length']
+        object = self.object.unsafe_get_item('length')
         if object.type != 'number': return iter([])
         length = object.toInteger()
         objects = []
         for index in range(length):
-            objects += [self.object[str(index)]]
+            objects += [self.object.unsafe_get_item(str(index))]
         return iter(objects)
 
 class Error:
@@ -845,11 +845,8 @@ class Object:
         globals.garbage[self.variable] = self
 
     @staticmethod
-    def get(*args):
-        keys = list(args)
-        object = Object('global', safe_get=keys.pop(0))
-        for key in keys:
-            object = object[key]
+    def get(key):
+        object = Object('global', safe_get=key)
         return object
 
     def new(self, *args):
@@ -878,19 +875,19 @@ class Object:
 
     def __iter__(self):
         keys = Object('Object.keys(global.%s)' % (self.variable))
-        length = keys['length'].toInteger()
+        length = keys.unsafe_get_item('length').toInteger()
         objects = []
         for index in range(length):
-            objects += [keys[str(index)].toString()]
+            objects += [keys.unsafe_get_item(str(index)).toString()]
         return iter(objects)
-
-    def __getitem__(self, key):
-        return Object(self.variable, safe_get=key) #, bind="object = typeof object != 'function' || object.prototype ? object : object.bind(global." + self.variable + ')')
 
     def __setitem__(self, key, value):
         run_safe_set(self.variable, key, json.parse_rpy_json(value))
         #run_javascript(('global.%s["%s"] = ' % (self.variable, key)) + json.parse_rpy_json(value))
         return
+
+    def unsafe_get_item(self, key):
+        return Object(self.variable, safe_get=key) #, bind="object = typeof object != 'function' || object.prototype ? object : object.bind(global." + self.variable + ')')
 
     def toString(self):
         return get_string(self.variable)
@@ -948,14 +945,21 @@ class Object:
         return self
 
     def wait(self, awaits, native_awaits, promise_id, parent_id):
-        self.resolved = True if self.type in ['null', 'undefined'] or self['then'].type != 'function' else False #False
+        self.resolved = True if self.type in ['null', 'undefined'] or self.unsafe_get_item('then').type != 'function' else False #False
         awaits.append(self)
         return self
 
     def _update(self):
         self.type = run_safe_type_update(self.variable)
         #self.type = run_javascript(String("if (global.{0} === null) {return 'null'} else if (Array.isArray(global.{0})) {return 'array'} else return typeof global.{0}").replace('{0}', self.variable).value, returns=True)
-        self.resolved = True if self.type in ['null', 'undefined'] or self['then'].type != 'function' else False if self['rpython_resolved'].type != 'boolean' else True
+        self.resolved = True if self.type in ['null', 'undefined'] or self.unsafe_get_item('then').type != 'function' else False if self.unsafe_get_item('rpython_resolved').type != 'boolean' else True
+
+def unsafe_object_get(*args):
+    keys = list(args)
+    object = Object('global', safe_get=keys.pop(0))
+    for key in keys:
+        object = object.unsafe_get_item(key)
+    return object
 
 class Wait:
 

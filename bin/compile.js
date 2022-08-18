@@ -113,7 +113,7 @@ if (process.argv[2] && process.argv[2].indexOf('.py') !== -1) {
     }
   }
   try {
-    fs.appendFileSync(path.join(process.cwd(), file + '.js' ), '\n' + deserialize_rpython_json.toString() + '\nModule.wasmMemory = wasmMemory;\nvar rpyGlobalArg = {"Module": Module, "deserialize_rpython_json": deserialize_rpython_json, "get_dirname": function () {return __dirname;}};\nrpyGlobalArg.global = rpyGlobalArg;\n if (typeof window !== "undefined") rpyGlobalArg.window = window;\n if (typeof require !== "undefined") rpyGlobalArg.require = require;\n if (typeof self !== "undefined") rpyGlobalArg.self = self;');
+    fs.appendFileSync(path.join(process.cwd(), file + '.js' ), '\n' + deserialize_rpython_json.toString() + '\nModule.wasmMemory = wasmMemory;\nvar rpyGlobalArg = {"Module": Module, "deserialize_rpython_json": deserialize_rpython_json, "get_dirname": function () {return __dirname;}};\nrpyGlobalArg.global = rpyGlobalArg;\n if (typeof window !== "undefined") rpyGlobalArg.window = window;\n if (typeof require !== "undefined") rpyGlobalArg.require = require;\n if (typeof self !== "undefined") rpyGlobalArg.self = self;\n if (typeof global !== "undefined") rpyGlobalArg.node = global;');
     if (source_flag) {
       var source_map = JSON.parse(require('fs').readFileSync(path.join(directory, file + '.wasm.map')));
       source_map.sources.forEach(function (filename, index) {
