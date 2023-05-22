@@ -4,6 +4,7 @@ primitives = [str, int, float, list, dict, bool, type(None)]
 
 def cast_primitive(value, get_type=False):
     if value in primitives: return str(value) if not get_type else value
+    if isinstance(value, JSFunction): return str(function_type)
     determine = None
     try:
         determine = type(value)
@@ -14,6 +15,8 @@ def cast_primitive(value, get_type=False):
         if determine is None or type(None) == determine: return lambda: None
         return determine
     return str(determine)
+
+function_type = type(cast_primitive)
 
 def generate_frozenset(structure): return frozenset({key: original_primitives.get(structure[key], structure[key]) if not isinstance(structure[key], JSObject) else structure[key].__serialize_structure__() for key in structure}.items())
 
@@ -45,7 +48,7 @@ class JSObject:
             object_cache[None] = Object
             return Object
         for key in structure:
-            setattr(Object, key, cast_primitive(structure[key], get_type=True)() if (not isclass(structure[key]) or not issubclass(structure[key], JSObject)) and structure[key] != JSObjectInstance else None)
+            setattr(Object, key, cast_primitive(structure[key], get_type=True)() if (not isclass(structure[key]) or not issubclass(structure[key], JSObject)) and structure[key] != JSObjectInstance and not isinstance(structure[key], JSFunction) else None)
         structure_serialized = generate_frozenset(structure)
         if structure_serialized in object_cache: return object_cache[structure_serialized]
         object_cache[structure_serialized] = Object
@@ -72,8 +75,8 @@ class JSFunction:
         function_cache[types_stringified] = new
         return new
 
-    def __hash__(self):
-        hash(tuple(self))
+    #def __hash__(self):
+    #    hash(tuple(self))
 
 Function = JSFunction()
 
@@ -123,6 +126,16 @@ DictClass = Dict
 Dict = Dict()
 
 original_primitives = {List: list, Dict: dict}
+
+#String Types (Enum)
+class Types:
+    int = str(int)
+    float = str(float)
+    bool = str(bool)
+    list = str(list)
+    dict = str(dict)
+    function = str(function_type)
+    str = str(str)
 
 list = List
 dict = Dict
