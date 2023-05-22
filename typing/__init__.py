@@ -26,7 +26,10 @@ class JSObject:
 
     structure = None
 
+    def __serialize_structure__(self): return frozenset()
+
     def __call__(self, structure=None):
+        if not structure: return JSObjectInstance
         class_structure = structure
         class Object(JSObject):
 
@@ -34,7 +37,7 @@ class JSObject:
 
             @classmethod
             def __serialize_structure__(self):
-                if not self.structure: return frozenset()
+                #if not self.structure: return frozenset()
                 return generate_frozenset(self.structure)
 
         if not structure:
@@ -42,13 +45,15 @@ class JSObject:
             object_cache[None] = Object
             return Object
         for key in structure:
-            setattr(Object, key, cast_primitive(structure[key], get_type=True)() if not isclass(structure[key]) or not issubclass(structure[key], JSObject) else None)
+            setattr(Object, key, cast_primitive(structure[key], get_type=True)() if (not isclass(structure[key]) or not issubclass(structure[key], JSObject)) and structure[key] != JSObjectInstance else None)
         structure_serialized = generate_frozenset(structure)
         if structure_serialized in object_cache: return object_cache[structure_serialized]
         object_cache[structure_serialized] = Object
         return Object
 
 Object = JSObject()
+
+JSObjectInstance = Object
 
 list_cache = {}
 
