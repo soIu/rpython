@@ -55,6 +55,28 @@ Object = JSObject()
 
 JSObjectInstance = Object
 
+function_cache = {}
+
+class JSFunction:
+
+    current_types = []
+
+    def __getitem__(self, types):
+        if not isinstance(types, tuple):
+            types = [types]
+        current_types = [cast_primitive(type) for type in types]
+        types_stringified = str(current_types)
+        if types_stringified in function_cache: return function_cache[types_stringified]
+        new = JSFunction()
+        new.current_types = current_types
+        function_cache[types_stringified] = new
+        return new
+
+    def __hash__(self):
+        hash(tuple(self))
+
+Function = JSFunction()
+
 list_cache = {}
 
 class List(list):
