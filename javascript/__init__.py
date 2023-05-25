@@ -18,3 +18,4 @@ if os.getenv('RPY_USE_EMSCRIPTEN') == 'true':
    JSON.fromFunction = fromFunction
    JSON.fromMethod = fromMethod
    typing.Object.get = Object.get
+   Object.Types = typing.Types

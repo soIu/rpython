@@ -936,9 +936,23 @@ class Object:
 
     def toRef(self): return self.toReference()
 
-    #def toDict(self): TODO
+    def toDict(self):
+        keys = Object('Object.keys(global.%s)' % (self.variable))
+        length = keys.unsafe_get_item('length').toInteger()
+        object = {}
+        for index in range(length):
+            key = keys.unsafe_get_item(str(index)).toInteger()
+            object[key] = self.unsafe_get_item(key)
+        return object
 
-    #def toList(self): TODO
+    def toList(self):
+        object = self.unsafe_get_item('length')
+        if object.type != 'number': return []
+        length = object.toInteger()
+        objects = []
+        for index in range(length):
+            objects += [self.object.unsafe_get_item(str(index))]
+        return objects
 
     def log(self):
         run_javascript('console.log(global.%s)' % (self.variable))
