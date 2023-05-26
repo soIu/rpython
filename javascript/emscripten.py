@@ -889,6 +889,12 @@ class Object:
     def unsafe_get_item(self, key):
         return Object(self.variable, safe_get=key) #, bind="object = typeof object != 'function' || object.prototype ? object : object.bind(global." + self.variable + ')')
 
+    #def unsafe_get_item_multiple(self, keys):
+    #    object = Object(self.variable, safe_get=keys.pop(0))
+    #    for key in keys:
+    #        object = Object(object.variable, safe_get=keys.pop(0))
+    #    return object
+
     def toString(self):
         return get_string(self.variable)
         #if self.type == 'string': return run_javascript('return global.%s' % self.variable, returns=True)
@@ -941,9 +947,25 @@ class Object:
         length = keys.unsafe_get_item('length').toInteger()
         object = {}
         for index in range(length):
-            key = keys.unsafe_get_item(str(index)).toInteger()
+            key = keys.unsafe_get_item(str(index)).toString()
             object[key] = self.unsafe_get_item(key)
         return object
+
+    def toDictStringString(self):
+        dict = self.toDict()
+        return {key: dict[key].toString() for key in dict]
+
+    def toDictStringInteger(self):
+        dict = self.toDict()
+        return {key: dict[key].toInteger() for key in dict]
+
+    def toDictStringFloat(self):
+        dict = self.toDict()
+        return {key: dict[key].toFloat() for key in dict]
+
+    def toDictStringBoolean(self):
+        dict = self.toDict()
+        return {key: dict[key].toBoolean() for key in dict]
 
     def toList(self):
         object = self.unsafe_get_item('length')
@@ -953,6 +975,18 @@ class Object:
         for index in range(length):
             objects += [self.object.unsafe_get_item(str(index))]
         return objects
+
+    def toListString(self):
+        return [item.toString() for item in self.toList()]
+
+    def toListInteger(self):
+        return [item.toInteger() for item in self.toList()]
+
+    def toListFloat(self):
+        return [item.toFloat() for item in self.toList()]
+
+    def toListBoolean(self):
+        return [item.toBoolean() for item in self.toList()]
 
     def log(self):
         run_javascript('console.log(global.%s)' % (self.variable))
