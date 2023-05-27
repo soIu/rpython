@@ -95,7 +95,7 @@ if (process.argv[2] && process.argv[2].indexOf('.py') !== -1) {
   if (platform === 'win32') make = make.replace('RPYDIR = ', 'RPYDIR = "' + rpydir + '"#')
   make = make.replace(/-lutil/g, '');
   make = make.replace(/--export-all-symbols/g, '--export-dynamic');
-  make = make.replace('CC = ', 'CC = ' + emcc + (!use_wasm ? ' -s WASM=0 ' : ' ') + '-s ALLOW_MEMORY_GROWTH=1 -s \'EXPORTED_FUNCTIONS=["_main", "_malloc", "_onresolve", "_onfunctioncall"]\' -s \'EXPORTED_RUNTIME_METHODS=["ccall", "wasmMemory"]\'' + (debug_flag ? ' -g3' : (source_flag ? ' -g4' : '')) + ' #');
+  make = make.replace('CC = ', 'CC = ' + emcc + (!use_wasm ? ' -s WASM=0 ' : ' ') + '-fsanitize=undefined -s ALLOW_MEMORY_GROWTH=1 -s \'EXPORTED_FUNCTIONS=["_main", "_malloc", "_onresolve", "_onfunctioncall"]\' -s \'EXPORTED_RUNTIME_METHODS=["ccall", "wasmMemory"]\'' + (debug_flag ? ' -g3' : (source_flag ? ' -g4' : '')) + ' #');
   make = make.replace('TARGET = ', 'TARGET = ' + file + '.js #');
   make = make.replace('DEFAULT_TARGET = ', 'DEFAULT_TARGET = ' + file + '.js #');
   fs.writeFileSync(makefile, make);
@@ -113,7 +113,7 @@ if (process.argv[2] && process.argv[2].indexOf('.py') !== -1) {
     }
   }
   try {
-    fs.appendFileSync(path.join(process.cwd(), file + '.js' ), '\n' + deserialize_rpython_json.toString() + '\nModule.wasmMemory = wasmMemory;\nvar rpyGlobalArg = {"Module": Module, "deserialize_rpython_json": deserialize_rpython_json, "get_dirname": function () {return __dirname;}};\nrpyGlobalArg.global = rpyGlobalArg;\n if (typeof window !== "undefined") rpyGlobalArg.window = window;\n if (typeof require !== "undefined") rpyGlobalArg.require = require;\n if (typeof self !== "undefined") rpyGlobalArg.self = self;\n if (typeof global !== "undefined") rpyGlobalArg.node = global;');
+    fs.appendFileSync(path.join(process.cwd(), file + '.js' ), '\n' + deserialize_rpython_json.toString() + '\nModule.wasmMemory = wasmMemory;\nvar rpyGlobalArg = {"Module": Module, "deserialize_rpython_json": deserialize_rpython_json, "get_dirname": function () {return __dirname;}};\nrpyGlobalArg.global = rpyGlobalArg;\n if (typeof window !== "undefined") rpyGlobalArg.window = window;\n if (typeof require !== "undefined") rpyGlobalArg.require = require;\n if (typeof self !== "undefined") rpyGlobalArg.self = self;\n if (typeof global !== "undefined") rpyGlobalArg.node = global;\nif (!WebAssembly.Module.customSections) WebAssembly.Module.customSections = () => [];');
     if (source_flag) {
       var source_map = JSON.parse(require('fs').readFileSync(path.join(directory, file + '.wasm.map')));
       source_map.sources.forEach(function (filename, index) {
@@ -125,8 +125,10 @@ if (process.argv[2] && process.argv[2].indexOf('.py') !== -1) {
     }
     if (process.argv.indexOf('--keep-temp') !== -1) process.exit();
     try {
-      if (fs.rmSync) fs.rmSync(tempdir, {recursive: true});
-      else fs.rmdirSync(tempdir, {recursive: true});
+      if (!process.env.KEEP_TMP) {
+        if (fs.rmSync) fs.rmSync(tempdir, {recursive: true});
+        else fs.rmdirSync(tempdir, {recursive: true});
+      }
     }
     catch (error) {
       child_process.execSync('rm -rf ' + tempdir);

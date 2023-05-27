@@ -76,7 +76,6 @@ def configure_object(object):
             loads += '\n' + indent + "self." + key + ' = ' + variable + '(' + "values.unsafe_get_item('" + key  + "')" + ')'
         else: loads += '\n' + indent + "if values.unsafe_get_item('" + key  + "').type != 'undefined': self." + key + ' = ' + "values.unsafe_get_item('" + key + "')" + adapt_object_to_field(field)
     loads += '\n' + indent + 'return self'
-    print(loads)
     exec(loads, namespace)
     object.loads = namespace['loads']
 
