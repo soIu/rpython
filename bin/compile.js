@@ -95,7 +95,7 @@ if (process.argv[2] && process.argv[2].indexOf('.py') !== -1) {
   if (platform === 'win32') make = make.replace('RPYDIR = ', 'RPYDIR = "' + rpydir + '"#')
   make = make.replace(/-lutil/g, '');
   make = make.replace(/--export-all-symbols/g, '--export-dynamic');
-  make = make.replace('CC = ', 'CC = ' + emcc + (!use_wasm ? ' -s WASM=0 ' : ' ') + '-s ALLOW_MEMORY_GROWTH=1 -s \'EXPORTED_FUNCTIONS=["_main", "_malloc", "_onresolve", "_onfunctioncall"]\' -s \'EXPORTED_RUNTIME_METHODS=["ccall"]\'' + (debug_flag ? ' -g3' : (source_flag ? ' -g4' : '')) + ' #');
+  make = make.replace('CC = ', 'CC = ' + emcc + (!use_wasm ? ' -s WASM=0 ' : ' ') + '-s ALLOW_MEMORY_GROWTH=1 -s \'EXPORTED_FUNCTIONS=["_main", "_malloc", "_onresolve", "_onfunctioncall"]\' -s \'EXPORTED_RUNTIME_METHODS=["ccall", "wasmMemory"]\'' + (debug_flag ? ' -g3' : (source_flag ? ' -g4' : '')) + ' #');
   make = make.replace('TARGET = ', 'TARGET = ' + file + '.js #');
   make = make.replace('DEFAULT_TARGET = ', 'DEFAULT_TARGET = ' + file + '.js #');
   fs.writeFileSync(makefile, make);

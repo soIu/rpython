@@ -650,6 +650,7 @@ def run_garbage_collector():
        globals.garbage = {}
     if globals.collector_id is not None: return
     globals.collector_id = ''
+    return
     #if not globals.pendingAsync: globals.pendingAsync = Object.fromDict({}).keep()
     if globals.setTimeout is None: globals.setTimeout = Object('Promise.resolve()').unsafe_get_item('then').keep().toFunction()
     if globals.snapshot is None:
@@ -844,11 +845,6 @@ class Object:
            """).format(self.variable, code, bind, prestart).value, returns=True)
         globals.garbage[self.variable] = self
 
-    @staticmethod
-    def get(key):
-        object = Object('global', safe_get=key)
-        return object
-
     def new(self, *args):
         json_args = '[' + ', '.join([json.parse_rpy_json(arg) for arg in list(args)]) + ']'
         return Object(json_args, safe_new=self.variable)
@@ -953,19 +949,19 @@ class Object:
 
     def toDictStringString(self):
         dict = self.toDict()
-        return {key: dict[key].toString() for key in dict]
+        return {key: dict[key].toString() for key in dict}
 
     def toDictStringInteger(self):
         dict = self.toDict()
-        return {key: dict[key].toInteger() for key in dict]
+        return {key: dict[key].toInteger() for key in dict}
 
     def toDictStringFloat(self):
         dict = self.toDict()
-        return {key: dict[key].toFloat() for key in dict]
+        return {key: dict[key].toFloat() for key in dict}
 
     def toDictStringBoolean(self):
         dict = self.toDict()
-        return {key: dict[key].toBoolean() for key in dict]
+        return {key: dict[key].toBoolean() for key in dict}
 
     def toList(self):
         object = self.unsafe_get_item('length')
@@ -989,7 +985,7 @@ class Object:
         return [item.toBoolean() for item in self.toList()]
 
     def log(self):
-        run_javascript('console.log(global.%s)' % (self.variable))
+        run_javascript('console.warn(global.%s)' % (self.variable))
         return self
 
     def wait(self, awaits, native_awaits, promise_id, parent_id):
@@ -1001,6 +997,13 @@ class Object:
         self.type = run_safe_type_update(self.variable)
         #self.type = run_javascript(String("if (global.{0} === null) {return 'null'} else if (Array.isArray(global.{0})) {return 'array'} else return typeof global.{0}").replace('{0}', self.variable).value, returns=True)
         self.resolved = True if self.type in ['null', 'undefined'] or self.unsafe_get_item('then').type != 'function' else False if self.unsafe_get_item('rpython_resolved').type != 'boolean' else True
+
+@staticmethod
+def unsafe_global_get(key):
+    object = Object('global', safe_get=key)
+    return object
+
+Object.get = unsafe_global_get
 
 def unsafe_object_get(*args):
     keys = list(args)

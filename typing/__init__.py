@@ -71,11 +71,12 @@ def configure_object(object):
         if field == JSObjectInstance:
             loads += '\n' + indent + "self." + key + " = values.unsafe_get_item('" + key  + "')"
         elif isclass(field) and issubclass(field, JSObject):
-            variable = 'class_' + count
+            variable = 'class_' + str(count)
             namespace[variable] = field
             loads += '\n' + indent + "self." + key + ' = ' + variable + '(' + "values.unsafe_get_item('" + key  + "')" + ')'
         else: loads += '\n' + indent + "if values.unsafe_get_item('" + key  + "').type != 'undefined': self." + key + ' = ' + "values.unsafe_get_item('" + key + "')" + adapt_object_to_field(field)
     loads += '\n' + indent + 'return self'
+    print(loads)
     exec(loads, namespace)
     object.loads = namespace['loads']
 
@@ -111,6 +112,14 @@ class JSObject:
         configure_object(Object)
         object_cache[structure_serialized] = Object
         return Object
+
+from threading import Timer
+Timer(2, lambda: delattr(JSObject, '__call__')).start()
+
+import os
+if os.getenv('RPY_USE_EMSCRIPTEN') == 'true':
+    from . import javascript
+    JSObject.get = javascript.unsafe_global_get
 
 Object = JSObject()
 

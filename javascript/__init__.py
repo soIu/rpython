@@ -1,5 +1,4 @@
 from . import json, types
-from .. import typing
 
 JSON = json
 
@@ -17,5 +16,3 @@ if os.getenv('RPY_USE_EMSCRIPTEN') == 'true':
    JSON.toFunction = toFunction"""
    JSON.fromFunction = fromFunction
    JSON.fromMethod = fromMethod
-   typing.Object.get = Object.get
-   Object.Types = typing.Types
