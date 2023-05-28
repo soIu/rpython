@@ -84,7 +84,7 @@ process.env.RPYTHON_TARGET_FILE = process.argv[2];
 process.env.PYPY_USESSION_DIR = platform === 'win32' ? cygpath(tempdir) : tempdir;
 process.env.USER = 'current';
 child_process.execSync([python, rpython, '--gc=none', '--no-translation-jit', '-s'].concat(process.argv.slice(2)).join(' '), {stdio: 'inherit', env: process.env});
-if (process.argv[2] && process.argv[2].indexOf('.py') !== -1) {
+async function handle() {
   var file = process.argv[2].split('.py')[0];
   var directory = path.join(tempdir, 'usession-unknown-0', 'testing_1');
   var makefile = path.join(directory, 'Makefile');
@@ -95,7 +95,7 @@ if (process.argv[2] && process.argv[2].indexOf('.py') !== -1) {
   if (platform === 'win32') make = make.replace('RPYDIR = ', 'RPYDIR = "' + rpydir + '"#')
   make = make.replace(/-lutil/g, '');
   make = make.replace(/--export-all-symbols/g, '--export-dynamic');
-  make = make.replace('CC = ', 'CC = ' + emcc + (!use_wasm ? ' -s WASM=0 ' : ' ') + '-fsanitize=undefined -s ALLOW_MEMORY_GROWTH=1 -s \'EXPORTED_FUNCTIONS=["_main", "_malloc", "_onresolve", "_onfunctioncall"]\' -s \'EXPORTED_RUNTIME_METHODS=["ccall", "wasmMemory"]\'' + (debug_flag ? ' -g3' : (source_flag ? ' -g4' : '')) + ' #');
+  make = make.replace('CC = ', 'CC = ' + emcc + (!use_wasm ? ' -s WASM=0 ' : ' ') + '-fdiagnostics-color=always -fsanitize=undefined -s ALLOW_MEMORY_GROWTH=1 -s \'EXPORTED_FUNCTIONS=["_main", "_malloc", "_onresolve", "_onfunctioncall"]\' -s \'EXPORTED_RUNTIME_METHODS=["ccall", "wasmMemory"]\'' + (debug_flag ? ' -g3' : (source_flag ? ' -g4' : '')) + ' #');
   make = make.replace('TARGET = ', 'TARGET = ' + file + '.js #');
   make = make.replace('DEFAULT_TARGET = ', 'DEFAULT_TARGET = ' + file + '.js #');
   fs.writeFileSync(makefile, make);
@@ -105,7 +105,12 @@ if (process.argv[2] && process.argv[2].indexOf('.py') !== -1) {
   if (platform === 'darwin') {
     process.env.C_INCLUDE_PATH = path.join(__dirname, '../dmidecode');
   }
-  child_process.execSync(['make', '-j', cores].join(' '), {env: process.env, stdio: 'inherit', cwd: directory});
+  var error = '';
+  var code = await new Promise((resolve) => child_process.spawn('make', ['-j', cores], {env: process.env, stdio: ['inherit', 'inherit', 'pipe'], cwd: directory}).on('close', resolve).stderr.on('data', (data) => process.stderr.write(error += data.toString())));
+  if (code !== 0) {
+    if (error.includes('wasm2js is not compatible with USE_OFFSET_CONVERTER')) throw new Error('\x1b[31mYour emcc wasm2js support is not patched yet, add --wasm to rpython command or comment out "wasm2js is not compatible with USE_OFFSET_CONVERTER" in emcc.py\x1b[0m').toString();
+    process.exit();
+  }
   for (var filename of fs.readdirSync(directory)) {
     if (filename.startsWith(file + '.')) {
       if (use_wasm || filename !== (file + '.js')) fs.copyFileSync(path.join(directory, filename), path.join(process.cwd(), filename));
@@ -138,3 +143,4 @@ if (process.argv[2] && process.argv[2].indexOf('.py') !== -1) {
     console.warn(error);
   }
 }
+if (process.argv[2] && process.argv[2].indexOf('.py') !== -1) handle().catch(console.error);
