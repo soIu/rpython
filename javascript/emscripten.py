@@ -476,6 +476,7 @@ def rpyobject(function):
         return Object(function(value), safe_json=True)
     return wrapper
 
+@staticmethod
 @rpyobject
 def toString(value):
     #if value is None: return 'null'
@@ -483,6 +484,7 @@ def toString(value):
 
 toStr = toString
 
+@staticmethod
 @rpyobject
 def toInt(value):
     #return '%s' % (value)
@@ -490,11 +492,13 @@ def toInt(value):
 
 toInteger = toInt
 
+@staticmethod
 @rpyobject
 def toFloat(value):
     #return repr(value)
     return json.fromFloat(value)
 
+@staticmethod
 @rpyobject
 def toBoolean(value):
     #return 'true' if value == True else 'false' if value == False else 'null'
@@ -502,10 +506,12 @@ def toBoolean(value):
 
 toBool = toBoolean
 
+@staticmethod
 @rpyobject
 def toList(value):
     return json.fromList(value)
 
+@staticmethod
 @rpyobject
 def toDict(value):
     return json.fromDict(value)
@@ -791,6 +797,7 @@ class Error:
     def __init__(self, message):
         run_script(rffi.str2charp('throw new Error(`%s`)' % message))
 
+@staticmethod
 def create_closure(function, *objects):
     object = Object(JSON.fromFunction(function), safe_closure_args=[object.toRef() for object in list(objects)])
     return object
@@ -801,17 +808,17 @@ class Object:
     resolved = True
     keep_from_gc = False
 
-    fromString = staticmethod(toString)
-    fromStr = staticmethod(toStr)
-    fromInteger = staticmethod(toInteger)
-    fromInt = staticmethod(toInt)
-    fromFloat = staticmethod(toFloat)
-    fromBoolean = staticmethod(toBoolean)
-    fromBool = staticmethod(toBool)
-    fromList = staticmethod(toList)
-    fromDict = staticmethod(toDict)
-    fromFunction = staticmethod(toFunction)
-    createClosure = staticmethod(create_closure)
+    fromString = (toString)
+    fromStr = (toStr)
+    fromInteger = (toInteger)
+    fromInt = (toInt)
+    fromFloat = (toFloat)
+    fromBoolean = (toBoolean)
+    fromBool = (toBool)
+    fromList = (toList)
+    fromDict = (toDict)
+    fromFunction = (toFunction)
+    createClosure = (create_closure)
 
     def __init__(self, code, bind='', prestart='', safe_json=False, safe_get="", safe_call="", safe_new=str(), safe_function=False, safe_function_info=str(), safe_method=0, safe_closure_args=None):
         self.id = globals.objects
@@ -920,7 +927,7 @@ class Object:
            return True if 'true' == self.toString() else False
         #return True if 'true' == get_boolean(self.variable) else False
         elif self.type in ['array', 'object']: return True
-        elif self.type == 'string': return self['length'].toBoolean()
+        elif self.type == 'string': return self.unsafe_get_item('length').toBoolean()
         elif self.type == 'number': return self.toInteger() != 0
         elif self.type in ['null', 'undefined']: return False
         return True
@@ -969,7 +976,7 @@ class Object:
         length = object.toInteger()
         objects = []
         for index in range(length):
-            objects += [self.object.unsafe_get_item(str(index))]
+            objects += [self.unsafe_get_item(str(index))]
         return objects
 
     def toListString(self):

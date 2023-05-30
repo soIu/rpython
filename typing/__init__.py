@@ -3,6 +3,7 @@ from inspect import isclass
 primitives = [str, int, float, list, dict, bool, type(None)]
 
 def cast_primitive(value, get_type=False):
+    if (isclass(value) and issubclass(value, JSObject)) or value == JSObjectInstance: return value
     if value in primitives: return str(value) if not get_type else value
     if isinstance(value, JSFunction): return str(function_type)
     determine = None
@@ -39,15 +40,15 @@ def adapt_object_to_field(type):
         return '.toFloat()'
     elif type == bool:
         return '.toBoolean()'
-    elif type in [List, primitives[3]] or isinstance(type, primitives[3]):
-        if type in [List, primitives[3]] or (isinstance(type, ListClass) and type.current_type == JSObjectInstance):
+    elif type == primitives[3] or isinstance(type, primitives[3]):
+        if type == primitives[3] or id(type) == id(List) or (isinstance(type, ListClass) and type.current_type == JSObjectInstance):
             return '.toList()'
         elif isinstance(type, ListClass) and type.current_type == Types.str: return '.toListString()'
         elif isinstance(type, ListClass) and type.current_type == Types.int: return '.toListInteger()'
         elif isinstance(type, ListClass) and type.current_type == Types.float: return '.toListFloat()'
         elif isinstance(type, ListClass) and type.current_type == Types.bool: return '.toListBoolean()'
-    elif type in [Dict, primitives[4]] or isinstance(type, primitives[4]):
-        if type in [Dict, primitives[4]] or (isinstance(type, DictClass) and type.current_types in [[str, None], [str, JSObjectInstance]]):
+    elif type == primitives[4] or isinstance(type, primitives[4]):
+        if type == primitives[4] or id(type) == id(Dict) or (isinstance(type, DictClass) and type.current_types in [[Type.str, None], [Type.str, JSObjectInstance]]):
             return '.toDict()'
         elif isinstance(type, DictClass) and type.current_types == [Types.str, Types.str]: return '.toDictStringString()'
         elif isinstance(type, DictClass) and type.current_types == [Types.str, Types.int]: return '.toDictStringInteger()'
@@ -74,6 +75,10 @@ def configure_object(object):
             variable = 'class_' + str(count)
             namespace[variable] = field
             loads += '\n' + indent + "self." + key + ' = ' + variable + '(' + "values.unsafe_get_item('" + key  + "')" + ')'
+        elif isinstance(field, ListClass) and (isclass(field.current_type) and issubclass(field.current_type, JSObject)):
+            variable = 'class_' + str(count)
+            namespace[variable] = field.current_type
+            loads += '\n' + indent + "self." + key + ' = [' + variable + '(value) ' + "for value in values.unsafe_get_item('" + key  + "').toList()" + ']'
         else: loads += '\n' + indent + "if values.unsafe_get_item('" + key  + "').type != 'undefined': self." + key + ' = ' + "values.unsafe_get_item('" + key + "')" + adapt_object_to_field(field)
     loads += '\n' + indent + 'return self'
     exec(loads, namespace)
@@ -91,6 +96,7 @@ class JSObject:
         class Object(JSObject):
 
             structure = class_structure
+            _current_object = None
 
             @classmethod
             def __serialize_structure__(self):
@@ -99,6 +105,13 @@ class JSObject:
 
             def __init__(self, values):
                 self.loads(values)
+                self._current_object = values
+
+            def newObject(self, *args): return self._current_object.new(*args)
+
+            def toObject(self): return self._current_object
+
+            def toRef(self): return self._current_object.toRef()
 
         if not structure:
             if None in object_cache: return object_cache[None]
@@ -113,14 +126,27 @@ class JSObject:
         return Object
 
 from threading import Timer
-Timer(2, lambda: delattr(JSObject, '__call__')).start()
+Timer(3, lambda: delattr(JSObject, '__call__')).start()
 
 import os
 if os.getenv('RPY_USE_EMSCRIPTEN') == 'true':
     from . import javascript
-    JSObject.get = javascript.unsafe_global_get
-
-Object = JSObject()
+    class JSObjectEmscripten(JSObject):
+        pass
+    JSObjectEmscripten.fromString = javascript.toString
+    JSObjectEmscripten.fromStr = javascript.toStr
+    JSObjectEmscripten.fromInteger = javascript.toInteger
+    JSObjectEmscripten.fromInt = javascript.toInt
+    JSObjectEmscripten.fromFloat = javascript.toFloat
+    JSObjectEmscripten.fromBoolean = javascript.toBoolean
+    JSObjectEmscripten.fromBool = javascript.toBool
+    JSObjectEmscripten.fromList = javascript.toList
+    JSObjectEmscripten.fromDict = javascript.toDict
+    JSObjectEmscripten.fromFunction = javascript.toFunction
+    JSObjectEmscripten.createClosure = javascript.create_closure
+    JSObjectEmscripten.get = javascript.unsafe_global_get
+    Object = JSObjectEmscripten()
+else: Object = JSObject()
 
 JSObjectInstance = Object
 
@@ -163,7 +189,7 @@ class List(list):
         return new
 
     def __hash__(self):
-        return list_hash if self.current_type is None else hash(self.current_type)
+        return list_hash if self.current_type == None else hash(self.current_type)
 
 ListClass = List
 List = List()
