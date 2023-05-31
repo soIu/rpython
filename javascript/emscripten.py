@@ -534,7 +534,7 @@ function_template = '''
 });
 '''
 
-def toFunction(function, keep=False):
+def toFunctionGlobal(function, keep=False):
     #if globals.functions_cache is None:
     #   globals.functions_cache = {}
     #if function in globals.functions_cache: return globals.functions_cache[function]
@@ -547,9 +547,11 @@ def toFunction(function, keep=False):
     #globals.functions_cache[function] = object
     return object
 
+toFunction = staticmethod(toFunctionGlobal)
+
 def fromFunction(function=None, keep=False):
     if function is None: return 'RPYJSON:null:RPYJSON'
-    return toFunction(function, keep=keep).toRef()
+    return toFunctionGlobal(function, keep=keep).toRef()
 
 @entrypoint_highlevel(key='main', c_name='onfunctioncall', argtypes=[rffi.CCHARP, rffi.CCHARP])
 def onfunctioncall(*arguments):
@@ -791,6 +793,19 @@ class Array:
         for index in range(length):
             objects += [self.object.unsafe_get_item(str(index))]
         return iter(objects)
+
+    def __len__(self):
+        object = self.object.unsafe_get_item('length')
+        if object.type != 'number': return 0
+        return object.toInteger()
+
+    def __getitem__(self, index):
+        assert isinstance(index, int)
+        return self.object.unsafe_get_item(str(index))
+
+    def __setitem__(self, index, value):
+        assert isinstance(index, int)
+        self.object[str(index)] = value
 
 class Error:
 

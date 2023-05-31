@@ -75,6 +75,7 @@ def configure_object(object):
             variable = 'class_' + str(count)
             namespace[variable] = field
             loads += '\n' + indent + "self." + key + ' = ' + variable + '(' + "values.unsafe_get_item('" + key  + "')" + ')'
+            loads += '\n' + indent + "self." + key + '.parent = self'
         elif isinstance(field, ListClass) and (isclass(field.current_type) and issubclass(field.current_type, JSObject)):
             variable = 'class_' + str(count)
             namespace[variable] = field.current_type
@@ -95,6 +96,7 @@ class JSObject:
         class_structure = structure
         class Object(JSObject):
 
+            parent = None
             structure = class_structure
             _current_object = None
 
@@ -106,6 +108,8 @@ class JSObject:
             def __init__(self, values):
                 self.loads(values)
                 self._current_object = values
+
+            def createObject(self, *args): return self._current_object.new(*args)
 
             def newObject(self, *args): return self._current_object.new(*args)
 
