@@ -127,9 +127,9 @@ EM_JS(const char*, run_safe_call, (const char* variable, const char* args, const
   args = JSON.parse(UTF8ToString(args));
   new_variable = UTF8ToString(new_variable);
   deserialize_rpython_json(args);
-  var call;
+  var js_function;
   try {
-    call = global[variable];
+    js_function = global[variable];
   }
   catch (error) {
     console.error('Trying to get variable ' + variable);
@@ -138,9 +138,13 @@ EM_JS(const char*, run_safe_call, (const char* variable, const char* args, const
   }
   var object;
   try {
-    object = call(...args);
+    object = js_function(...args);
   }
   catch (error) {
+   if (global.activeRPYTypingError) {
+     console.error(global.activeRPYTypingError);
+     delete global.activeRPYTypingError;
+   }
    console.error('Trying to call variable ' + variable);
    console.error(error);
    throw error;
@@ -872,8 +876,11 @@ class Object:
         return Object(json_args, safe_new=self.variable)
 
     def call(self, *args):
+        return self.call_list(list(args))
+
+    def call_list(self, args):
         #if not args: return Object(String('call()').replace('{0}', self.variable).value, prestart='var call = global.' + self.variable)
-        json_args = '[' + ', '.join([json.parse_rpy_json(arg) for arg in list(args)]) + ']'
+        json_args = '[' + ', '.join([json.parse_rpy_json(arg) for arg in args]) + ']'
         return Object(json_args, safe_call=self.variable)
         #return Object(String('call(...[{1}])').replace('{0}', self.variable).replace('{1}', json_args).value, prestart='var call = global.' + self.variable)
 
@@ -954,6 +961,12 @@ class Object:
 
     def toFunction(self):
         return self.call
+
+    def toClosure(self, function, *args):
+        new_args = [self.toRef()]
+        for arg in list(args): new_args.append(arg.toRef())
+        closure = Object(JSON.fromFunction(function), safe_closure_args=new_args)
+        return closure.call
 
     def toReference(self):
         return 'RPYJSOBJECT:' + self.variable + ':RPYJSOBJECT'

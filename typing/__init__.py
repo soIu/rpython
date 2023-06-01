@@ -66,6 +66,7 @@ def configure_object(object):
     indent = ' ' * 4
     count = 0
     namespace = {}
+    import os
     for key in object.structure:
         count += 1
         field = object.structure[key]
@@ -80,6 +81,17 @@ def configure_object(object):
             variable = 'class_' + str(count)
             namespace[variable] = field.current_type
             loads += '\n' + indent + "self." + key + ' = [' + variable + '(value) ' + "for value in values.unsafe_get_item('" + key  + "').toList()" + ']'
+        elif os.getenv('RPY_USE_EMSCRIPTEN') == 'true' and field == Function:
+            error = 'An error occured when calling %s: ' % (key)
+            from . import javascript
+            @javascript.Function
+            def prepareError(args):
+                assert args is not None and len(args) >= 1
+                javascript.Object.get('global')['activeRPYTypingError'] = error
+                return args[0].call_list([arg.toRef() for arg in args[1:]])
+            variable = 'function_' + str(count)
+            namespace[variable] = prepareError
+            loads += '\n' + indent + "self." + key + " = values.unsafe_get_item('" + key  + "').toClosure(" + variable + ")"
         else: loads += '\n' + indent + "if values.unsafe_get_item('" + key  + "').type != 'undefined': self." + key + ' = ' + "values.unsafe_get_item('" + key + "')" + adapt_object_to_field(field)
     loads += '\n' + indent + 'return self'
     exec(loads, namespace)
