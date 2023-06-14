@@ -39,40 +39,23 @@ It will compiles the main.py to WASM file and it's .js files (to load the WASM) 
 # JS API
 There are some JS API that can be used to help interfacing to JS, awaiting asynchronous functions, and building nested, multi-hierarchial, multi-types JSON:
 
-- JS Bindings
-
-```python
-from javascript import Object, JSON
-
-def main(argv):
-    console = Object('console') #Evaluate string and binds corresponding object to Object instance
-    console['log'].call('Logging from rpython')
-    #__getitem__ and __setitem__ works in RPython but unfortunately __call__ doesn't,
-    #so we replace it with call method. Call receives *args of string, can receive stringified json from JSON
-    console['log'].call(JSON.fromDict({
-      'array': JSON.fromList(['regular string', JSON.fromInt(2)]),
-      'another_json': JSON.fromDict({})
-    }))
-    #JSON exports useful helpers to serialize python primitive types to stringified version that are recognized in JS as their respective types
-    json_object = Object('{}') #Plain object
-    json_object['is_empty'] = JSON.fromBool(True) #__setitem__
-    json_object.log() #Prints {"is_empty": true}
-    return 0
-
-def target(*args): return main, None
-```
-
 - Async/Await like syntax
 
 ```python
-from javascript import Object, asynchronous
+from javascript import asynchronous
+from typing import Object, Function
+
+Response = Object({
+    'text': Function,
+})
 
 @asynchronous
 def get_page(url):
     require = Object('require')
     fetch = require.call('node-fetch') #Obviously, install node-fetch first on npm
-    response = fetch.call(url).wait()
-    text = response['text'].call().wait()
+    fetch_response = fetch.call(url).wait()
+    response = Response(fetch_response)
+    text = response.text().wait()
     return text
 
 @asynchronous
