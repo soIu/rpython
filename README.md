@@ -5,7 +5,7 @@ This is a fork from PyPy's RPython in the original bitbucket [repo](https://bitb
 Graham Jenson writes a nice [article](https://maori.geek.nz/rpython-compiling-python-to-c-for-the-speed-5411d57a5316) about it. Basically, RPython is what powers PyPy as described in its documentation [here](https://rpython.readthedocs.io/en/latest/).
 
 # Installation
-RPython it self depends on PyPy (or Python 2.7) and GCC on Linux and Windows (Cygwin), on MacOS it uses clang. Install PyPy from the official [website](https://pypy.org/download.html) ([PyPy still supports 2.7](https://hub.packtpub.com/pypy-supports-python-2-7-even-as-major-python-projects-migrate-to-python-3/)) or alternatively use existing Python 2.7 on your system. Then, install emcc from Emscripten's [SDK](https://emscripten.org/docs/getting_started/downloads.html)
+RPython it self depends on PyPy (or Python 2.7) and GCC on Linux and Windows (Cygwin), on MacOS it uses clang. Install PyPy from the official [website](https://pypy.org/download.html) ([PyPy still supports 2.7](https://hub.packtpub.com/pypy-supports-python-2-7-even-as-major-python-projects-migrate-to-python-3/)) or alternatively use existing Python 2.7 on your system. ~~Then, install emcc from Emscripten's [SDK](https://emscripten.org/docs/getting_started/downloads.html).~~ IMPORTANT: Because of recent changes in emscripten/clang/llvm, this fork doesn't work anymore. Install emscripten version 3.0.1 if you can or use ```--docker``` parameter to use docker version of the emscripten (you can pull the image first with ```docker pull emscripten/emsdk:3.0.1``` to ensure the image is downloaded)
 
 Install rpython with npm:
 ```shell
@@ -39,40 +39,23 @@ It will compiles the main.py to WASM file and it's .js files (to load the WASM) 
 # JS API
 There are some JS API that can be used to help interfacing to JS, awaiting asynchronous functions, and building nested, multi-hierarchial, multi-types JSON:
 
-- JS Bindings
-
-```python
-from javascript import Object, JSON
-
-def main(argv):
-    console = Object('console') #Evaluate string and binds corresponding object to Object instance
-    console['log'].call('Logging from rpython')
-    #__getitem__ and __setitem__ works in RPython but unfortunately __call__ doesn't,
-    #so we replace it with call method. Call receives *args of string, can receive stringified json from JSON
-    console['log'].call(JSON.fromDict({
-      'array': JSON.fromList(['regular string', JSON.fromInt(2)]),
-      'another_json': JSON.fromDict({})
-    }))
-    #JSON exports useful helpers to serialize python primitive types to stringified version that are recognized in JS as their respective types
-    json_object = Object('{}') #Plain object
-    json_object['is_empty'] = JSON.fromBool(True) #__setitem__
-    json_object.log() #Prints {"is_empty": true}
-    return 0
-
-def target(*args): return main, None
-```
-
 - Async/Await like syntax
 
 ```python
-from javascript import Object, asynchronous
+from javascript import asynchronous
+from typing import Object, Function
+
+Response = Object({
+    'text': Function,
+})
 
 @asynchronous
 def get_page(url):
     require = Object('require')
     fetch = require.call('node-fetch') #Obviously, install node-fetch first on npm
-    response = fetch.call(url).wait()
-    text = response['text'].call().wait()
+    fetch_response = fetch.call(url).wait()
+    response = Response(fetch_response)
+    text = response.text().wait()
     return text
 
 @asynchronous
