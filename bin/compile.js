@@ -7,15 +7,18 @@ var child_process = require('child_process');
 var rpython = path.join(__dirname, 'rpython');
 var rpydir = path.join(rpython, '../..')
 var platform = os.platform();
+var uid = os.userInfo().uid;
+var gid = os.userInfo().gid;
 
 process.env.RPY_USE_EMSCRIPTEN = 'true';
 
-function check_exist(command, dont_append_version) {
+function check_exist(command, dont_append_version, log_error) {
   try {
     child_process.execSync(command + (dont_append_version ? '' : ' --version'), {stdio: 'ignore'});
     return true;
   }
   catch (error) {
+    if (log_error) console.log(error);
     return false;
   }
 }
@@ -69,7 +72,9 @@ function rpythonShrinkToInitial(copy) {
 
 var use_wasm = process.argv.indexOf('--wasm') !== -1;
 
-var emcc = platform === 'win32' ? 'emcc.bat' : 'emcc';
+var use_docker = process.argv.indexOf('--docker') !== -1;
+
+var emcc = (platform === 'win32' && !use_docker) ? 'emcc.bat' : 'emcc';
 var python = 'pypy';
 if (!check_exist('pypy')) {
   python = 'python2.7';
@@ -77,8 +82,10 @@ if (!check_exist('pypy')) {
 }
 if (!check_exist('make -v', true)) throw new Error('make (usually comes from build-essential, or just install the standalone package) must be installed and exist on PATH');
 //if (!check_exist('gcc -v', true)) console.error('GCC (gcc) is somewhat needed, but not necessary');
-if (!check_exist(emcc + ' -v', true)) throw new Error('emcc (comes with emsdk) must be installed and exist on PATH');
-var tempdir = path.join(os.tmpdir(), 'rpython-' + (new Date()).getTime());
+if (!use_docker && !check_exist(emcc + ' -v', true)) throw new Error('emcc (comes with emsdk) must be installed and exist on PATH');
+if (use_docker && !check_exist('docker -v', true)) throw new Error('Docker must be installed and exist on PATH');
+var namedir = 'rpython-' + (new Date()).getTime();
+var tempdir = path.join(os.tmpdir(), namedir);
 fs.mkdirSync(tempdir);
 process.env.RPYTHON_TARGET_FILE = process.argv[2];
 process.env.PYPY_USESSION_DIR = platform === 'win32' ? cygpath(tempdir) : tempdir;
@@ -86,6 +93,7 @@ process.env.USER = 'current';
 child_process.execSync([python, rpython, '--gc=none', '--no-translation-jit', '-s'].concat(process.argv.slice(2)).join(' '), {stdio: 'inherit', env: process.env});
 async function handle() {
   var file = process.argv[2].split('.py')[0];
+  var usession = path.join(tempdir, 'usession-unknown-0');
   var directory = path.join(tempdir, 'usession-unknown-0', 'testing_1');
   var makefile = path.join(directory, 'Makefile');
   var make = fs.readFileSync(makefile).toString();
@@ -93,9 +101,10 @@ async function handle() {
   var source_flag = process.argv.indexOf('--source-map') !== -1;
   if (process.argv.indexOf('--use-pthread') === -1) make = make.replace(/-pthread/g, '');
   if (platform === 'win32') make = make.replace('RPYDIR = ', 'RPYDIR = "' + rpydir + '"#')
+  if (use_docker) make = make.replace('RPYDIR = ', 'RPYDIR = "/src/rpython/"#')
   make = make.replace(/-lutil/g, '');
   make = make.replace(/--export-all-symbols/g, '--export-dynamic');
-  make = make.replace('CC = ', 'CC = ' + emcc + (!use_wasm ? ' -s WASM=0 ' : ' ') + '-fdiagnostics-color=always -fsanitize=undefined -s ALLOW_MEMORY_GROWTH=1 -s \'EXPORTED_FUNCTIONS=["_main", "_malloc", "_onresolve", "_onfunctioncall"]\' -s \'EXPORTED_RUNTIME_METHODS=["ccall", "wasmMemory"]\'' + (debug_flag ? ' -g3' : (source_flag ? ' -g4' : '')) + ' #');
+  make = make.replace('CC = ', 'CC = ' + emcc + (!use_wasm ? ' -s WASM=0 ' : ' ') + '-fdiagnostics-color=always -s ALLOW_MEMORY_GROWTH=1 -s \'EXPORTED_FUNCTIONS=["_main", "_malloc", "_onresolve", "_onfunctioncall"]\' -s \'EXPORTED_RUNTIME_METHODS=["ccall"]\'' + (debug_flag ? ' -g3' : (source_flag ? ' -g4' : '')) + ' #');
   make = make.replace('TARGET = ', 'TARGET = ' + file + '.js #');
   make = make.replace('DEFAULT_TARGET = ', 'DEFAULT_TARGET = ' + file + '.js #');
   fs.writeFileSync(makefile, make);
@@ -105,11 +114,31 @@ async function handle() {
   if (platform === 'darwin') {
     process.env.C_INCLUDE_PATH = path.join(__dirname, '../dmidecode');
   }
+  if (use_docker) {
+    child_process.execSync('docker volume create ' + namedir);
+    child_process.execSync('docker create --name ' + namedir + ' -v ' + namedir + ':/rpython hello-world');
+    child_process.execSync(`docker cp ${tempdir} ${namedir}:/rpython/`);
+    child_process.execSync(`docker cp ${rpydir} ${namedir}:/rpython/`);
+    child_process.execSync('docker rm ' + namedir);
+  }
   var error = '';
-  var code = await new Promise((resolve) => child_process.spawn('make', ['-j', cores], {env: process.env, stdio: ['inherit', 'inherit', 'pipe'], cwd: directory}).on('close', resolve).stderr.on('data', (data) => process.stderr.write(error += data.toString())));
+  var command = 'make';
+  var args = ['-j', cores];
+  if (use_docker) {
+    args = ['run', ...(platform === 'darwin' ? ['-e', 'C_INCLUDE_PATH=/src/rpython/dmidecode'] : []), '--rm', '-v', `${namedir}:/src`, '-w', '/src/' + namedir + '/usession-unknown-0/testing_1','emscripten/emsdk:3.0.1', command].concat(args);
+    command = 'docker';
+  }
+  var code = await new Promise((resolve) => child_process.spawn(command, args, {env: process.env, stdio: ['inherit', 'inherit', 'pipe'], cwd: directory}).on('close', resolve).stderr.on('data', (data) => process.stderr.write(/*error +=*/ data.toString())));
   if (code !== 0) {
     if (error.includes('wasm2js is not compatible with USE_OFFSET_CONVERTER')) throw new Error('\x1b[31mYour emcc wasm2js support is not patched yet, add --wasm to rpython command or comment out "wasm2js is not compatible with USE_OFFSET_CONVERTER" in emcc.py\x1b[0m').toString();
+    if (use_docker) child_process.execSync('docker volume rm ' + namedir);
     process.exit();
+  }
+  if (use_docker) {
+    child_process.execSync('docker volume create ' + namedir);
+    child_process.execSync('docker create --name ' + namedir + ' -v ' + namedir + ':/rpython hello-world');
+    child_process.execSync(`docker cp ${namedir}:/rpython/${namedir}/usession-unknown-0 ${tempdir}`);
+    child_process.execSync('docker rm ' + namedir);
   }
   for (var filename of fs.readdirSync(directory)) {
     if (filename.startsWith(file + '.')) {
@@ -138,6 +167,7 @@ async function handle() {
     catch (error) {
       child_process.execSync('rm -rf ' + tempdir);
     }
+    if (use_docker) child_process.execSync('docker volume rm ' + namedir);
   }
   catch (error) {
     console.warn(error);
