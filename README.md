@@ -5,7 +5,7 @@ This is a fork from PyPy's RPython in the original bitbucket [repo](https://bitb
 Graham Jenson writes a nice [article](https://maori.geek.nz/rpython-compiling-python-to-c-for-the-speed-5411d57a5316) about it. Basically, RPython is what powers PyPy as described in its documentation [here](https://rpython.readthedocs.io/en/latest/).
 
 # Installation
-RPython it self depends on PyPy (or Python 2.7) and GCC on Linux and Windows (Cygwin), on MacOS it uses clang. Install PyPy from the official [website](https://pypy.org/download.html) ([PyPy still supports 2.7](https://hub.packtpub.com/pypy-supports-python-2-7-even-as-major-python-projects-migrate-to-python-3/)) or alternatively use existing Python 2.7 on your system. Then, install emcc from Emscripten's [SDK](https://emscripten.org/docs/getting_started/downloads.html)
+RPython it self depends on PyPy (or Python 2.7) and GCC on Linux and Windows (Cygwin), on MacOS it uses clang. Install PyPy from the official [website](https://pypy.org/download.html) ([PyPy still supports 2.7](https://hub.packtpub.com/pypy-supports-python-2-7-even-as-major-python-projects-migrate-to-python-3/)) or alternatively use existing Python 2.7 on your system. ~~Then, install emcc from Emscripten's [SDK](https://emscripten.org/docs/getting_started/downloads.html).~~ IMPORTANT: Because of recent changes in emscripten/clang/llvm, this fork doesn't work anymore. Install emscripten version 3.0.1 if you can or use ```--docker``` parameter to use docker version of the emscripten (you can pull the image first with ```docker pull emscripten/emsdk:3.0.1``` to ensure the image is downloaded)
 
 Install rpython with npm:
 ```shell
