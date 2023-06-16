@@ -80,9 +80,9 @@ if (!check_exist('pypy')) {
   python = 'python2.7';
   if (!check_exist('python2.7')) throw new Error('PyPy (pypy not pypy3) or Python 2.7 (python2.7) must be installed and exist on PATH');
 }
-if (!check_exist('make -v', true)) throw new Error('make (usually comes from build-essential, or just install the standalone package) must be installed and exist on PATH');
+if (!use_docker && !check_exist('make -v', true)) throw new Error('make (usually comes from build-essential, or just install the standalone package) must be installed and exist on PATH');
 //if (!check_exist('gcc -v', true)) console.error('GCC (gcc) is somewhat needed, but not necessary');
-if (!use_docker && !check_exist(emcc + ' -v', true)) throw new Error('emcc (comes with emsdk) must be installed and exist on PATH');
+if (!use_docker && !check_exist(emcc + ' -v', true)) throw new Error('emcc (comes with emsdk) v3.0.1 must be installed and exist on PATH. Use --docker for easier setup');
 if (use_docker && !check_exist('docker -v', true)) throw new Error('Docker must be installed and exist on PATH');
 var namedir = 'rpython-' + (new Date()).getTime();
 var tempdir = path.join(os.tmpdir(), namedir);
@@ -135,7 +135,6 @@ async function handle() {
     process.exit();
   }
   if (use_docker) {
-    child_process.execSync('docker volume create ' + namedir);
     child_process.execSync('docker create --name ' + namedir + ' -v ' + namedir + ':/rpython hello-world');
     child_process.execSync(`docker cp ${namedir}:/rpython/${namedir}/usession-unknown-0 ${tempdir}`);
     child_process.execSync('docker rm ' + namedir);
